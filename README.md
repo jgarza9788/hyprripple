@@ -27,9 +27,9 @@ softness and duration:
   fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
 - **negative**: the screen under the disc, colour-inverted. Holding keeps it
   inverted.
-- **water**: a pebble in a pond. Three thin concentric wavelets, each weaker
-  than the one ahead, refract the screen, with soft white highlights on the
-  crests. It's colourless. `distortion` sets how hard it bends.
+- **water**: a light ripple on calm water. A thin main ring and one faint
+  follower gently refract the screen, with a whisper of white on the crests.
+  It's colourless. `distortion` sets how hard it bends.
 - **prism**: one thick glass lens band with no ripples. It magnifies outward
   and pinches inward, splits red, green and blue widely, and casts a slowly
   turning spectral rainbow around the ring, so it reads as a prism even over
@@ -123,9 +123,11 @@ spawns, so a theme switch recolors ripples with no reload.
 ```sh
 hyprctl hyprripple get                    # current settings (JSON)
 hyprctl hyprripple set opacity 0.2        # live, no reload
-hyprctl hyprripple trigger [x y [radius]] [above] [style=<preset>]
+hyprctl hyprripple trigger [x y [radius]] [above] [key=value...]
                                           # ripple now; "above" draws over bars;
-                                          # style= previews a preset without changing settings
+                                          # style= opacity= duration= softness= distortion=
+                                          # sparkle_amount= ring_width= style this one ripple
+                                          # only - live/saved settings never change
 hyprctl hyprripple sharing [reset]        # screen-share pause state
 hyprctl hyprripple stats                  # counters, frames drawn, live ripples
 ```

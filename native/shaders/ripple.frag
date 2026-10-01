@@ -7,9 +7,9 @@
 //                     turbulent edge and shimmering noise sparkles that
 //                     trail the wave front and dissolve as it fades
 //   mode 3  negative  the screen under the disc, colour-inverted
-//   mode 4  water     a pebble in a pond: three oscillating concentric
-//                     rings, each weaker than the one ahead, refracting the
-//                     screen, with soft white caustics on the crests
+//   mode 4  water     a light ripple on calm water: a thin main ring and one
+//                     faint follower refracting the screen gently, with a
+//                     whisper of white on the crests
 //   mode 5  prism     a single thick glass lens band (no oscillation):
 //                     magnifies outward / pinches inward, splits R/G/B
 //                     widely, and casts a spectral rainbow around the ring
@@ -132,15 +132,15 @@ vec2 fbOffsetFromCenter() {
     return inverse(duv) * (v_texcoord - 0.5);
 }
 
-// Water: three concentric wavelets trailing the front, 1 : 0.6 : 0.35.
+// Water: a thin main wavelet and one faint follower, 1 : 0.4.
 // Returns (displacement factor, envelope).
 vec2 waterWaves(float dist) {
-    float w    = max(0.09 * radius, 7.0 * pxScale);
+    float w    = max(0.06 * radius, 5.0 * pxScale);
     float k    = 6.2831853 / (w * 1.1);
     float wave = 0.0;
     float env  = 0.0;
-    for (int i = 0; i < 3; i++) {
-        float amp = i == 0 ? 1.0 : (i == 1 ? 0.6 : 0.35);
+    for (int i = 0; i < 2; i++) {
+        float amp = i == 0 ? 1.0 : 0.4;
         float d   = dist - radius + float(i) * 2.2 * w;
         float e   = amp * exp(-(d / w) * (d / w));
         wave += sin(d * k) * e;
@@ -188,11 +188,12 @@ void main() {
             color = vec3(1.0) - clamp(bgAt(frag), 0.0, 1.0);
         } else if (mode == 4) {
             vec2  wp     = waterWaves(dist);
-            vec2  offset = dir * waveAmp * wp.x;
+            // a gentle bend: 60% of the wave reach budget
+            vec2  offset = dir * waveAmp * 0.6 * wp.x;
             float crest  = max(wp.x, 0.0);
-            mask         = clamp(wp.y * 1.6, 0.0, 1.0);
-            // colourless water: light catches the crests
-            color = bgAt(frag - offset) + vec3(crest * crest * 0.22);
+            mask         = clamp(wp.y * 1.3, 0.0, 1.0);
+            // colourless water: just a whisper of light on the crests
+            color = bgAt(frag - offset) + vec3(crest * crest * 0.08);
         } else {
             vec2 lp     = prismLens(dist);
             vec2 offset = dir * waveAmp * lp.x;
