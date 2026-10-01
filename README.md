@@ -28,7 +28,7 @@ softness and duration:
 - **negative**: the screen under the disc, colour-inverted. Holding keeps it
   inverted.
 - **water**: a light ripple on calm water. A thin main ring and one faint
-  follower gently refract the screen, with a whisper of white on the crests.
+  follower refract the screen, with only a faint glint on the crests.
   It's colourless. `distortion` sets how hard it bends.
 - **prism**: one thick glass lens band with no ripples. It magnifies outward
   and pinches inward, splits red, green and blue widely, and casts a slowly

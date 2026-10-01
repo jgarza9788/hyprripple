@@ -189,12 +189,12 @@ void main() {
             color = vec3(1.0) - clamp(bgAt(frag), 0.0, 1.0);
         } else if (mode == 4) {
             vec2  wp     = waterWaves(dist);
-            // a gentle bend: 60% of the wave reach budget
-            vec2  offset = dir * waveAmp * waveDecay * 0.6 * wp.x;
+            // a gentle bend: 80% of the wave reach budget
+            vec2  offset = dir * waveAmp * waveDecay * 0.8 * wp.x;
             float crest  = max(wp.x, 0.0);
             mask         = clamp(wp.y * 1.3, 0.0, 1.0);
-            // colourless water: just a whisper of light on the crests
-            color = bgAt(frag - offset) + vec3(crest * crest * 0.08);
+            // colourless water: only a faint glint on the crests
+            color = bgAt(frag - offset) + vec3(crest * crest * 0.02);
         } else {
             vec2 lp     = prismLens(dist);
             vec2 offset = dir * waveAmp * waveDecay * lp.x;
