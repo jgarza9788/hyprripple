@@ -27,8 +27,9 @@ softness and duration:
   fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
 - **negative**: the screen under the disc, colour-inverted. Holding keeps it
   inverted.
-- **water**: a light ripple on calm water. A thin main ring and one faint
-  follower refract the screen, with only a faint glint on the crests.
+- **water**: a single swell on calm water. One smooth crest and trough
+  refract the screen like a lens of water. Its outline wobbles organically,
+  there's a faint shimmer across the swell, and only a faint glint on top.
   It's colourless. `distortion` sets how hard it bends.
 - **prism**: one thick glass lens band with no ripples. It magnifies outward
   and pinches inward, splits red, green and blue widely, and casts a slowly

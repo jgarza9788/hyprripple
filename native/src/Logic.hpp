@@ -62,6 +62,10 @@ namespace Logic {
     // Largest sample displacement (logical px) a wave can reach for its
     // radius; the ripple's damage area grows by this much.
     float waveReach(int mode, float maxRadius, float distortion);
+    // How far past the current radius a wave's soft band is still visible
+    // (logical px): the drawn area must cover it or the band is cut off.
+    // Must match the shader's band widths (waterSwell / prismLens).
+    float waveBand(int mode, float radius);
 
     // ── timing ───────────────────────────────────────────────────────────────
 

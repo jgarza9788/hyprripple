@@ -7,9 +7,10 @@
 //                     turbulent edge and shimmering noise sparkles that
 //                     trail the wave front and dissolve as it fades
 //   mode 3  negative  the screen under the disc, colour-inverted
-//   mode 4  water     a light ripple on calm water: a thin main ring and one
-//                     faint follower refracting the screen gently, with a
-//                     whisper of white on the crests
+//   mode 4  water     a single swell on calm water: one smooth crest/trough
+//                     that refracts the screen like a lens of water, with an
+//                     organically wobbling outline, a faint surface shimmer
+//                     and the barest glint on the crest
 //   mode 5  prism     a single thick glass lens band (no oscillation):
 //                     magnifies outward / pinches inward, splits R/G/B
 //                     widely, and casts a spectral rainbow around the ring
@@ -133,28 +134,29 @@ vec2 fbOffsetFromCenter() {
     return inverse(duv) * (v_texcoord - 0.5);
 }
 
-// Water: a thin main wavelet and one faint follower, 1 : 0.4.
+// Water: one swell. The derivative of a gaussian gives a single crest and
+// trough - content bulges like it's seen through a lens of water - with the
+// outline wobbling slowly so it isn't a perfect geometric circle, and a
+// faint shimmer across the swell. Band width must match Logic::waveBand.
 // Returns (displacement factor, envelope).
-vec2 waterWaves(float dist) {
-    float w    = max(0.06 * radius, 5.0 * pxScale);
-    float k    = 6.2831853 / (w * 1.1);
-    float wave = 0.0;
-    float env  = 0.0;
-    for (int i = 0; i < 2; i++) {
-        float amp = i == 0 ? 1.0 : 0.4;
-        float d   = dist - radius + float(i) * 2.2 * w;
-        float e   = amp * exp(-(d / w) * (d / w));
-        wave += sin(d * k) * e;
-        env   = max(env, e);
-    }
-    return vec2(wave, env);
+vec2 waterSwell(vec2 px, float dist) {
+    vec2  d      = px - center;
+    float angle  = atan(d.y, d.x);
+    vec2  ap     = vec2(cos(angle), sin(angle)) * 1.6 + seed;
+    float r      = radius + (valueNoise(ap + time * 0.6) - 0.5) * 0.04 * radius;
+    float w      = max(0.10 * radius, 8.0 * pxScale);
+    float s      = (dist - r) / w;
+    float e      = exp(-s * s);
+    float swell  = -s * e * 2.3; // peak ~ +/-1
+    float shimmer = (valueNoise(px / (7.0 * pxScale) + vec2(time * 1.7, -time * 1.3) + seed) - 0.5) * 0.25 * e;
+    return vec2(swell + shimmer, e);
 }
 
 // Prism: one smooth lens band - the derivative of a gaussian, so content is
 // pushed outward on the outer half and pulled inward on the inner half
 // (a bulge), with no ringing. Returns (displacement factor, envelope).
 vec2 prismLens(float dist) {
-    float w = max(0.22 * radius, 14.0 * pxScale);
+    float w = max(0.22 * radius, 14.0 * pxScale); // must match Logic::waveBand
     float s = (dist - radius) / w;
     float e = exp(-s * s);
     return vec2(-s * e * 2.3, e); // 2.3 ~ 1/max of s*exp(-s^2): peak ~1
@@ -188,11 +190,11 @@ void main() {
             mask  = 1.0 - smoothstep(radius - soft, radius + soft, dist);
             color = vec3(1.0) - clamp(bgAt(frag), 0.0, 1.0);
         } else if (mode == 4) {
-            vec2  wp     = waterWaves(dist);
-            // a gentle bend: 80% of the wave reach budget
+            vec2  wp     = waterSwell(px, dist);
+            // 80% of the wave reach budget (swell + shimmer stays < 1.15)
             vec2  offset = dir * waveAmp * waveDecay * 0.8 * wp.x;
             float crest  = max(wp.x, 0.0);
-            mask         = clamp(wp.y * 1.3, 0.0, 1.0);
+            mask         = clamp(wp.y * 1.5, 0.0, 1.0);
             // colourless water: only a faint glint on the crests
             color = bgAt(frag - offset) + vec3(crest * crest * 0.02);
         } else {

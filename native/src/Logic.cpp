@@ -54,6 +54,15 @@ namespace Logic {
         return mode == MODE_WATER || mode == MODE_PRISM;
     }
 
+    float waveBand(int mode, float radius) {
+        // gaussian band: exp(-s^2) is < 0.2% past 2.5 widths
+        if (mode == MODE_WATER)
+            return 2.5f * std::max(0.10f * radius, 8.f);
+        if (mode == MODE_PRISM)
+            return 2.5f * std::max(0.22f * radius, 14.f);
+        return 0.f;
+    }
+
     float waveReach(int mode, float maxRadius, float distortion) {
         if (!isWaveMode(mode))
             return 0.f;

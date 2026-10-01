@@ -111,6 +111,9 @@ int main() {
         ok("distortion rejects text", !applySetting(s, "distortion", "lots").empty());
         ok("sampling modes", isSamplingMode(3) && isSamplingMode(4) && isSamplingMode(5) && !isSamplingMode(0) && !isSamplingMode(2));
         ok("wave modes", isWaveMode(4) && isWaveMode(5) && !isWaveMode(3));
+        ok("band only for waves", waveBand(0, 200) == 0.f && waveBand(3, 200) == 0.f);
+        ok("water band", near(waveBand(4, 200), 50.f) && near(waveBand(4, 10), 20.f));
+        ok("prism band", near(waveBand(5, 200), 110.f) && near(waveBand(5, 10), 35.f));
         ok("no reach for non-waves", waveReach(0, 200, 1) == 0.f && waveReach(3, 200, 1) == 0.f);
         ok("reach grows with distortion", waveReach(4, 200, 1) > waveReach(4, 200, 0.2f) && waveReach(4, 200, 0) == 0.f);
         ok("reach capped", waveReach(5, 1e6f, 1) <= 48.f * 2.0f + 1e-3f);

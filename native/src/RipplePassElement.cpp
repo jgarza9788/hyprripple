@@ -105,7 +105,7 @@ void RippleShader::destroy() {
 
 // How far past the radius this ripple can draw or sample (logical px).
 static float overreach(const SRipple& rp, float radius) {
-    return radius * (rp.mode == 2 ? 0.08f : 0.f) + Logic::waveReach(rp.mode, rp.maxRadius, rp.distortion) + rp.softness + 2.f;
+    return radius * (rp.mode == 2 ? 0.08f : 0.f) + Logic::waveBand(rp.mode, radius) + Logic::waveReach(rp.mode, rp.maxRadius, rp.distortion) + rp.softness + 2.f;
 }
 
 bool CRipplePassElement::disableSimplification() {

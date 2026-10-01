@@ -64,7 +64,7 @@ Logic::Life SRipple::life(steady_clock::time_point now) const {
 CBox SRipple::bounds() const {
     // sparkle's turbulent rim can reach ~5% past the radius; water / prism
     // sample (and so need fresh pixels) up to their wave reach beyond it
-    const float r = maxRadius * (mode == 2 ? 1.08f : 1.f) + Logic::waveReach(mode, maxRadius, distortion) + softness + 4.f;
+    const float r = maxRadius * (mode == 2 ? 1.08f : 1.f) + Logic::waveBand(mode, maxRadius) + Logic::waveReach(mode, maxRadius, distortion) + softness + 4.f;
     CBox        box{center.x - r, center.y - r, r * 2.0, r * 2.0};
     if (clip)
         box = box.intersection(clipBox.copy().expand(4));
