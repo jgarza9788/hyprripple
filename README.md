@@ -13,14 +13,14 @@ like water, or bent through a rainbow lens.
 **On Omarchy** (gets you the settings panel and menu entries too):
 
 ```sh
-omarchy plugin add <repo-url> --enable
+omarchy plugin add https://github.com/jgarza9788/hyprripple --enable
 ~/.config/omarchy/plugins/jgarza.hyprripple/install
 ```
 
 **On plain Hyprland** (the native plugin only, set up through Lua):
 
 ```sh
-git clone <repo-url> hyprripple && cd hyprripple
+git clone https://github.com/jgarza9788/hyprripple hyprripple && cd hyprripple
 ./install --no-menu
 ```
 

@@ -262,7 +262,7 @@ do_install() {
     step "Omarchy shell plugin (settings panel + background service)"
     if [[ $REPO_DIR != "$PLUGINS_DIR/$ID" ]]; then
       warn "this checkout isn't at $PLUGINS_DIR/$ID, so Omarchy won't find the panel."
-      warn "Install with: omarchy plugin add <repo-url> --enable   (then run ./install from there)"
+      warn "Install with: omarchy plugin add https://github.com/jgarza9788/hyprripple --enable   (then run ./install from there)"
     else
       run omarchy-shell -q shell rescanPlugins
       if (( DRY_RUN )); then skip "would run: omarchy-plugin-enable $ID"; else omarchy-plugin-enable "$ID" >/dev/null 2>&1 && ok "enabled $ID" || warn "couldn't enable $ID - run: omarchy plugin enable $ID"; fi

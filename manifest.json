@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "jgarza.hyprripple",
   "name": "HyprRipple",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "jgarza",
   "license": "MIT",
-  "description": "Material Design ink ripples drawn by Hyprland itself, in your theme's accent color, on mouse clicks, window focus and workspace switches. Needs the bundled native plugin (hyprpm). Open the settings with: omarchy-shell shell toggle jgarza.hyprripple",
+  "description": "Material Design ink ripples drawn by Hyprland itself, in your theme's accent colour: on clicks, taps, focus changes and workspace switches. Six presets: Classic, Ring, Sparkle, Negative, Water, Prism. After adding, run ./install in the plugin folder to build the native plugin. Settings: Omarchy menu > Style > HyprRipple.",
   "kinds": [
     "panel",
     "service"
@@ -14,5 +14,6 @@
   "entryPoints": {
     "panel": "Panel.qml",
     "service": "Service.qml"
-  }
+  },
+  "homepage": "https://github.com/jgarza9788/hyprripple"
 }
