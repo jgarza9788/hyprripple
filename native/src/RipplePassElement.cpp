@@ -157,7 +157,7 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
         s_sample->getTexture()->bind();
         glUniform1i(s_u.tex, 0);
         glUniform2f(s_u.fbSize, s_sample->m_size.x, s_sample->m_size.y);
-        // Base amplitude; prism's widest channel reaches 1.7x (see waveReach).
+        // Base amplitude; prism's widest channel reaches 2x (see waveReach).
         glUniform1f(s_u.waveAmp, Logic::waveReach(Logic::MODE_WATER, rp.maxRadius, rp.distortion) * scale);
     }
 

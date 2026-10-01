@@ -58,7 +58,8 @@ namespace Logic {
         if (!isWaveMode(mode))
             return 0.f;
         // must match the shader's amplitude (ripple.frag: waveAmp)
-        return std::clamp(distortion, 0.f, 1.f) * std::clamp(maxRadius * 0.12f, 6.f, 48.f) * (mode == MODE_PRISM ? 1.7f : 1.f);
+        // prism's blue channel samples at 2x the offset
+        return std::clamp(distortion, 0.f, 1.f) * std::clamp(maxRadius * 0.12f, 6.f, 48.f) * (mode == MODE_PRISM ? 2.0f : 1.f);
     }
 
     bool isColorKey(std::string_view v) {

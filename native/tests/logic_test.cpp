@@ -113,7 +113,7 @@ int main() {
         ok("wave modes", isWaveMode(4) && isWaveMode(5) && !isWaveMode(3));
         ok("no reach for non-waves", waveReach(0, 200, 1) == 0.f && waveReach(3, 200, 1) == 0.f);
         ok("reach grows with distortion", waveReach(4, 200, 1) > waveReach(4, 200, 0.2f) && waveReach(4, 200, 0) == 0.f);
-        ok("reach capped", waveReach(5, 1e6f, 1) <= 48.f * 1.7f + 1e-3f);
+        ok("reach capped", waveReach(5, 1e6f, 1) <= 48.f * 2.0f + 1e-3f);
 
         bool  mono = true;
         float prev = -1;

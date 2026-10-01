@@ -7,10 +7,12 @@
 //                     turbulent edge and shimmering noise sparkles that
 //                     trail the wave front and dissolve as it fades
 //   mode 3  negative  the screen under the disc, colour-inverted
-//   mode 4  water     the screen refracted by a travelling wave packet,
-//                     with a faint accent caustic on the crest
-//   mode 5  prism     the same wave, R/G/B refracted by different amounts
-//                     (a rainbow-fringed shockwave) with an accent glow
+//   mode 4  water     a pebble in a pond: three oscillating concentric
+//                     rings, each weaker than the one ahead, refracting the
+//                     screen, with soft white caustics on the crests
+//   mode 5  prism     a single thick glass lens band (no oscillation):
+//                     magnifies outward / pinches inward, splits R/G/B
+//                     widely, and casts a spectral rainbow around the ring
 //
 // Modes 3-5 read `tex`, a copy of the frame rendered so far. They work in
 // framebuffer pixel space (gl_FragCoord), so sampling is exact under any
@@ -130,17 +132,35 @@ vec2 fbOffsetFromCenter() {
     return inverse(duv) * (v_texcoord - 0.5);
 }
 
-// Wave packet around the travelling front: a main crest at the radius and a
-// smaller trailing one. Returns (displacement factor, envelope).
-vec2 wavePacket(float dist) {
-    float w    = max(0.15 * radius, 10.0 * pxScale);
-    float k    = 6.2831853 / (w * 0.9);
-    float d1   = dist - radius;
-    float d2   = d1 + 1.6 * w;
-    float e1   = exp(-(d1 / w) * (d1 / w));
-    float e2   = 0.5 * exp(-(d2 / w) * (d2 / w));
-    float wave = sin(d1 * k) * e1 + sin(d2 * k) * e2;
-    return vec2(wave, max(e1, e2));
+// Water: three concentric wavelets trailing the front, 1 : 0.6 : 0.35.
+// Returns (displacement factor, envelope).
+vec2 waterWaves(float dist) {
+    float w    = max(0.09 * radius, 7.0 * pxScale);
+    float k    = 6.2831853 / (w * 1.1);
+    float wave = 0.0;
+    float env  = 0.0;
+    for (int i = 0; i < 3; i++) {
+        float amp = i == 0 ? 1.0 : (i == 1 ? 0.6 : 0.35);
+        float d   = dist - radius + float(i) * 2.2 * w;
+        float e   = amp * exp(-(d / w) * (d / w));
+        wave += sin(d * k) * e;
+        env   = max(env, e);
+    }
+    return vec2(wave, env);
+}
+
+// Prism: one smooth lens band - the derivative of a gaussian, so content is
+// pushed outward on the outer half and pulled inward on the inner half
+// (a bulge), with no ringing. Returns (displacement factor, envelope).
+vec2 prismLens(float dist) {
+    float w = max(0.22 * radius, 14.0 * pxScale);
+    float s = (dist - radius) / w;
+    float e = exp(-s * s);
+    return vec2(-s * e * 2.3, e); // 2.3 ~ 1/max of s*exp(-s^2): peak ~1
+}
+
+vec3 spectrum(float h) {
+    return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
 }
 
 void main() {
@@ -166,18 +186,24 @@ void main() {
         if (mode == 3) {
             mask  = 1.0 - smoothstep(radius - soft, radius + soft, dist);
             color = vec3(1.0) - clamp(bgAt(frag), 0.0, 1.0);
-        } else {
-            vec2  wp     = wavePacket(dist);
+        } else if (mode == 4) {
+            vec2  wp     = waterWaves(dist);
             vec2  offset = dir * waveAmp * wp.x;
             float crest  = max(wp.x, 0.0);
             mask         = clamp(wp.y * 1.6, 0.0, 1.0);
-            if (mode == 4) {
-                color = bgAt(frag - offset) + inkColor.rgb * crest * crest * 0.35;
-            } else {
-                color = vec3(bgAt(frag - offset).r, bgAt(frag - offset * 1.35).g, bgAt(frag - offset * 1.7).b);
-                float glow = exp(-pow((dist - radius) / max(0.05 * radius, 3.0 * pxScale), 2.0));
-                color += inkColor.rgb * glow * 0.3;
-            }
+            // colourless water: light catches the crests
+            color = bgAt(frag - offset) + vec3(crest * crest * 0.22);
+        } else {
+            vec2 lp     = prismLens(dist);
+            vec2 offset = dir * waveAmp * lp.x;
+            mask        = clamp(lp.y * 1.4, 0.0, 1.0);
+            color = vec3(bgAt(frag - offset).r, bgAt(frag - offset * 1.5).g, bgAt(frag - offset * 2.0).b);
+            // spectral light spread around the band, slowly rotating, so it
+            // reads as a prism even over a dark screen
+            float ang  = atan(rel.y, rel.x) / 6.2831853;
+            float band = (dist - radius) / max(0.22 * radius, 14.0 * pxScale);
+            vec3  rainbow = spectrum(fract(ang + band * 0.25 + time * 0.15));
+            color += rainbow * lp.y * 0.28;
         }
 
         float a = clamp(mask * clipMask * alpha, 0.0, 1.0);

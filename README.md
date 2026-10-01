@@ -27,10 +27,13 @@ softness and duration:
   fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
 - **negative**: the screen under the disc, colour-inverted. Holding keeps it
   inverted.
-- **water**: the screen refracted by a travelling wave packet, with a faint
-  accent caustic on the crest. `distortion` sets how hard it bends.
-- **prism**: the same wave, but red, green and blue refract by different
-  amounts, giving a rainbow-fringed shockwave with an accent glow.
+- **water**: a pebble in a pond. Three thin concentric wavelets, each weaker
+  than the one ahead, refract the screen, with soft white highlights on the
+  crests. It's colourless. `distortion` sets how hard it bends.
+- **prism**: one thick glass lens band with no ripples. It magnifies outward
+  and pinches inward, splits red, green and blue widely, and casts a slowly
+  turning spectral rainbow around the ring, so it reads as a prism even over
+  a dark screen.
 
 Negative, water and prism read the frame rendered so far: one GPU copy per
 ripple per frame, only while one is alive. They sample in framebuffer pixel

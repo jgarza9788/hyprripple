@@ -35,7 +35,7 @@ var SCHEMA = [
       { value: "selection_background", label: "Selection" }
     ], fallback: "accent" },
   { section: "Look", key: "style", type: "enum", label: "Preset",
-    description: "Ink: Classic, Ring, Sparkle. Screen effects: Negative inverts, Water refracts in a travelling wave, Prism splits into a rainbow shockwave (Opacity = effect strength). Each remembers its own opacity, radius and softness.",
+    description: "Ink: Classic, Ring, Sparkle. Screen effects: Negative inverts, Water ripples it like a pond, Prism bends it through a rainbow glass lens (Opacity = effect strength). Each remembers its own opacity, radius and softness.",
     options: [
       { value: "classic", label: "Classic" },
       { value: "ring", label: "Ring" },
