@@ -40,6 +40,7 @@ $(TARGET): $(OBJ)
 test: native/build/logic_test
 	@native/build/logic_test | grep -v '^PASS'
 	@node tests/model.test.js | grep -v '^PASS'
+	@bash tests/setup.test.sh | grep -v '^PASS'
 
 native/build/logic_test: native/src/Logic.cpp native/src/Logic.hpp native/tests/logic_test.cpp
 	@mkdir -p native/build

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Install HyprRipple. Safe to re-run; also upgrades. See ./install --help
+exec "$(dirname "${BASH_SOURCE[0]}")/bin/setup.sh" install "$@"
