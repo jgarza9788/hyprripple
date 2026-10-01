@@ -112,6 +112,33 @@ ok("nudge enum back", M.nudge(M.itemFor("on_click"), "none", -1) === "any");
 ok("nudge color from custom", M.nudge(M.itemFor("color"), "#123456", 1) === "accent");
 ok("nudge text no-op", M.nudge(M.itemFor("exclude"), "mpv", 1) === "mpv");
 
+// per-preset memory
+{
+  let st = Object.assign(M.defaults(), { style: "sparkle", opacity: 0.2, radius: 140, softness: 2 });
+  st.opacity = 0.45; st.radius = 300; st.softness = 9;            // tweak sparkle
+  let r = M.switchPreset(st, {}, "classic");
+  ok("switch applies target defaults", r.settings.style === "classic" && r.settings.opacity === 0.28 && r.settings.radius === 140);
+  ok("switch remembers the preset left", r.memory.sparkle.opacity === 0.45 && r.memory.sparkle.radius === 300 && r.memory.sparkle.softness === 9);
+  r.settings.opacity = 0.12;                                         // tweak classic
+  r = M.switchPreset(r.settings, r.memory, "sparkle");
+  ok("switching back restores", r.settings.opacity === 0.45 && r.settings.radius === 300 && r.settings.softness === 9);
+  ok("classic remembered too", r.memory.classic.opacity === 0.12);
+  r = M.switchPreset(r.settings, r.memory, "classic");
+  ok("and classic restores", r.settings.opacity === 0.12);
+  ok("non-preset keys untouched", r.settings.on_click === "left" && r.settings.color === "accent");
+  ok("duration still follows preset", r.settings.duration === M.PRESETS.classic.duration);
+  ok("unknown style no-op", M.switchPreset(st, {}, "nope").settings === st);
+}
+ok("defaultFor preset key", M.defaultFor("opacity", { style: "ring" }) === 0.5);
+ok("defaultFor other key", M.defaultFor("duration", { style: "ring" }) === 550);
+ok("defaultFor unknown style", M.defaultFor("opacity", { style: "x" }) === 0.28);
+const mem = M.parseMemory('{"sparkle":{"opacity":7,"radius":"x","softness":3,"evil":"; rm"},"__proto__":{"opacity":1},"nope":{}}');
+ok("memory clamps", mem.sparkle.opacity === 1);
+ok("memory drops bad values", mem.sparkle.radius === undefined && mem.sparkle.evil === undefined);
+ok("memory drops unknown presets", Object.keys(mem).join() === "sparkle");
+ok("memory junk -> empty", JSON.stringify(M.parseMemory("not json")) === "{}" && JSON.stringify(M.parseMemory("[1]")) === "{}");
+ok("memory round trip", JSON.stringify(M.parseMemory(M.renderMemory({ ring: { opacity: 0.4 } }))) === '{"ring":{"opacity":0.4}}');
+
 // hyprctl
 ok("set command bool", M.setCommand("bounded", false).join(" ") === "hyprctl hyprripple set bounded false");
 const batch = M.batchCommand(M.defaults());

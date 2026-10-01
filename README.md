@@ -24,6 +24,12 @@ softness and duration:
   edge and shimmering noise sparkles that trail the wave and dissolve as it
   fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
 
+Each preset remembers its own opacity, radius and edge softness. Tweak
+sparkle, switch to classic and back, and your sparkle values return. Those
+three rows' reset buttons go back to the current preset's default. The panel
+keeps this memory in `~/.config/omarchy/jgarza.hyprripple/presets.json`.
+`hyprctl hyprripple set style …` switches the preset without it.
+
 There are two halves:
 
 | Part | What it is |

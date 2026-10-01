@@ -19,6 +19,12 @@ Item {
   property var manifest: null
 
   readonly property string luaPath: Quickshell.env("HOME") + "/.config/hypr/hyprripple.lua"
+  // Per-preset opacity/radius/softness. Panel-only state, so it lives next to
+  // the other jgarza.* plugin state rather than in hyprripple.lua (which
+  // Hyprland parses and would reject unknown keys in).
+  readonly property string stateDir: Quickshell.env("HOME") + "/.config/omarchy/jgarza.hyprripple"
+  readonly property string memoryPath: stateDir + "/presets.json"
+  property var presetMemory: ({})
 
   property bool opened: false
   property var settings: Model.defaults()
@@ -46,6 +52,7 @@ Item {
     root.opened = true
     root.errorText = ""
     luaFile.reload()
+    memoryFile.reload()
     statusProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -68,11 +75,12 @@ Item {
 
   // ----------------------------------------------------------------- values
 
-  // Reset one value to its default. A preset reset only restores `style`;
-  // opacity/duration/etc. keep their own reset buttons.
+  // Reset one value to its default - for opacity/radius/softness that's the
+  // current preset's default. A preset reset only restores `style`; the
+  // other values keep their own reset buttons.
   function resetValue(key) {
     var item = Model.itemFor(key)
-    if (item) setValue(key, item.fallback, true, true)
+    if (item) setValue(key, Model.defaultFor(key, root.settings), true, true)
   }
 
   function setValue(key, raw, commit, noPreset) {
@@ -83,7 +91,9 @@ Item {
     // A preset brings its own opacity/softness/duration; apply them as one
     // batch, then fire a ripple so the pick is visible straight away.
     if (key === "style" && !noPreset) {
-      root.settings = Model.applyPreset(root.settings, c.value)
+      var switched = Model.switchPreset(root.settings, root.presetMemory, c.value)
+      root.settings = switched.settings
+      root.presetMemory = switched.memory
       applyAllProc.command = Model.batchCommand(root.settings)
       applyAllProc.running = true
       persistTimer.restart()
@@ -97,7 +107,11 @@ Item {
     root.settings = next
 
     push(key, c.value)
-    if (commit) persistTimer.restart()
+    if (commit) {
+      // Remember the tweak under the current preset.
+      if (Model.isPresetKey(key)) root.presetMemory = Model.rememberPreset(root.presetMemory, next)
+      persistTimer.restart()
+    }
   }
 
   // One set in flight, newest value queued behind it, so a slider drag
@@ -128,6 +142,8 @@ Item {
 
   function persistNow() {
     persistTimer.stop()
+    var mem = Model.renderMemory(root.presetMemory)
+    if (mem !== memoryFile.text()) memoryFile.setText(mem)
     var next = Model.renderLua(root.settings)
     if (next === luaFile.text()) return
     root.selfWrite = true
@@ -137,6 +153,7 @@ Item {
 
   function resetAll() {
     root.settings = Model.defaults()
+    root.presetMemory = ({})
     applyAllProc.command = Model.batchCommand(root.settings)
     applyAllProc.running = true
     persistNow()
@@ -232,6 +249,22 @@ Item {
     interval: 1600
     running: root.statusText === "Saved"
     onTriggered: root.statusText = ""
+  }
+
+  // The state dir has to exist before the first save.
+  Process {
+    running: true
+    command: ["mkdir", "-p", root.stateDir]
+  }
+
+  FileView {
+    id: memoryFile
+    path: root.memoryPath
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.presetMemory = Model.parseMemory(text())
+    onLoadFailed: root.presetMemory = ({})
+    onSaveFailed: root.errorText = "Could not write " + root.memoryPath
   }
 
   FileView {
@@ -420,6 +453,7 @@ Item {
             accent: root.accent
             fontFamily: root.fontFamily
             swatch: root.pluginLoaded ? root.status.resolved_color : root.accent
+            defaultValue: Model.defaultFor(modelData.key, root.settings)
             opacity: (modelData.key === "enabled" || root.settings.enabled) ? 1 : 0.45
             onEdited: function(v) { root.setValue(modelData.key, v, false) }
             onCommitted: function(v) { root.setValue(modelData.key, v, true) }

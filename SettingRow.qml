@@ -29,7 +29,10 @@ Item {
   }
 
   // Differs from the schema default -> show the reset button and the pip.
-  readonly property bool modified: String(value) !== String(item.fallback)
+  // What reset restores; the panel passes the current preset's default for
+  // per-preset values.
+  property var defaultValue: item.fallback
+  readonly property bool modified: String(value) !== String(defaultValue)
 
   readonly property bool isBool: item.type === "bool"
   readonly property bool isEnum: item.type === "enum"
@@ -129,7 +132,7 @@ Item {
       PanelActionButton {
         id: resetButton
         iconText: "󰕌"
-        tooltipText: "Reset to default (" + String(root.item.fallback) + ")"
+        tooltipText: "Reset to default (" + String(root.defaultValue) + ")"
         foreground: root.foreground
         opacity: root.modified ? 1 : 0
         enabled: root.modified

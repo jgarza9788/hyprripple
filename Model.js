@@ -92,9 +92,85 @@ var SECTIONS = ["Triggers", "Look", "Motion", "Exclude"]
 
 // What picking a preset sets alongside `style`. Everything stays tweakable.
 var PRESETS = {
-  classic: { opacity: 0.28, softness: 2, duration: 550 },
-  ring:    { opacity: 0.5, softness: 1.5, ring_width: 6, duration: 600 },
-  sparkle: { opacity: 0.2, softness: 2, duration: 800 }
+  classic: { opacity: 0.28, radius: 140, softness: 2, duration: 550 },
+  ring:    { opacity: 0.5, radius: 140, softness: 1.5, ring_width: 6, duration: 600 },
+  sparkle: { opacity: 0.2, radius: 140, softness: 2, duration: 800 }
+}
+
+// Values each preset remembers on its own: tweak sparkle's opacity, switch to
+// classic and back, and sparkle's opacity comes back. Their reset buttons
+// return to the current preset's default rather than the global one.
+var PRESET_KEYS = ["opacity", "radius", "softness"]
+
+function isPresetKey(key) {
+  return PRESET_KEYS.indexOf(key) !== -1
+}
+
+// What a row's reset button restores, given the current settings.
+function defaultFor(key, settings) {
+  var item = itemFor(key)
+  if (!item) return undefined
+  if (isPresetKey(key) && settings) {
+    var preset = PRESETS[settings.style]
+    if (preset && preset[key] !== undefined) return preset[key]
+  }
+  return item.fallback
+}
+
+// Record the current preset's remembered values into `memory`
+// ({ style: { opacity, radius, softness } }); returns a new object.
+function rememberPreset(memory, settings) {
+  var out = cleanMemory(memory)
+  if (!settings || !PRESETS[settings.style]) return out
+  var slot = {}
+  for (var i = 0; i < PRESET_KEYS.length; i++) {
+    var c = coerce(PRESET_KEYS[i], settings[PRESET_KEYS[i]])
+    if (c.ok) slot[PRESET_KEYS[i]] = c.value
+  }
+  out[settings.style] = slot
+  return out
+}
+
+// Switch preset: remember the one we leave, apply the new preset's defaults,
+// then its remembered values on top. Returns { settings, memory }.
+function switchPreset(settings, memory, style) {
+  if (!PRESETS[style]) return { settings: settings, memory: cleanMemory(memory) }
+  var mem = rememberPreset(memory, settings)
+  var next = applyPreset(settings, style)
+  var saved = mem[style]
+  if (saved)
+    for (var i = 0; i < PRESET_KEYS.length; i++)
+      if (saved[PRESET_KEYS[i]] !== undefined) next[PRESET_KEYS[i]] = saved[PRESET_KEYS[i]]
+  return { settings: next, memory: mem }
+}
+
+// Only known presets and keys, with validated values - the file is
+// hand-editable, so treat it as untrusted.
+function cleanMemory(memory) {
+  var out = {}
+  if (!memory || typeof memory !== "object") return out
+  for (var style in PRESETS) {
+    if (!Object.prototype.hasOwnProperty.call(memory, style)) continue
+    var slot = memory[style]
+    if (!slot || typeof slot !== "object") continue
+    var clean = {}
+    for (var i = 0; i < PRESET_KEYS.length; i++) {
+      var key = PRESET_KEYS[i]
+      if (!Object.prototype.hasOwnProperty.call(slot, key)) continue
+      var c = coerce(key, slot[key])
+      if (c.ok) clean[key] = c.value
+    }
+    out[style] = clean
+  }
+  return out
+}
+
+function parseMemory(text) {
+  try { return cleanMemory(JSON.parse(String(text || ""))) } catch (e) { return {} }
+}
+
+function renderMemory(memory) {
+  return JSON.stringify(cleanMemory(memory), null, 2) + "\n"
 }
 
 // settings with `style` and its preset values applied
@@ -318,6 +394,14 @@ if (typeof module !== "undefined") {
     PRESETS: PRESETS,
     nudge: nudge,
     applyPreset: applyPreset,
+    PRESET_KEYS: PRESET_KEYS,
+    isPresetKey: isPresetKey,
+    defaultFor: defaultFor,
+    rememberPreset: rememberPreset,
+    switchPreset: switchPreset,
+    cleanMemory: cleanMemory,
+    parseMemory: parseMemory,
+    renderMemory: renderMemory,
     itemFor: itemFor,
     defaults: defaults,
     rowsFor: rowsFor,
