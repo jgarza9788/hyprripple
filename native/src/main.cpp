@@ -62,8 +62,9 @@ Logic::Life SRipple::life(steady_clock::time_point now) const {
 }
 
 CBox SRipple::bounds() const {
-    // sparkle's turbulent rim can reach ~5% past the radius
-    const float r = maxRadius * (mode == 2 ? 1.08f : 1.f) + softness + 4.f;
+    // sparkle's turbulent rim can reach ~5% past the radius; water / prism
+    // sample (and so need fresh pixels) up to their wave reach beyond it
+    const float r = maxRadius * (mode == 2 ? 1.08f : 1.f) + Logic::waveReach(mode, maxRadius, distortion) + softness + 4.f;
     CBox        box{center.x - r, center.y - r, r * 2.0, r * 2.0};
     if (clip)
         box = box.intersection(clipBox.copy().expand(4));
@@ -76,7 +77,7 @@ namespace {
     struct SConfigValues {
         SP<CV::Bool>   enabled, onTouch, hold, onFocus, focusHover, onWorkspace, bounded, skipFullscreen, pauseWhenSharing;
         SP<CV::String> color, workspaceRadius, style, onClick, focusOrigin, exclude;
-        SP<CV::Float>  opacity, radius, softness, ringWidth, sparkleAmount;
+        SP<CV::Float>  opacity, radius, softness, ringWidth, sparkleAmount, distortion;
         SP<CV::Int>    duration, maxRipples;
     };
 
@@ -162,6 +163,7 @@ namespace {
             {"style", c.style->value()},
             {"ring_width", f(c.ringWidth->value())},
             {"sparkle_amount", f(c.sparkleAmount->value())},
+            {"distortion", f(c.distortion->value())},
             {"on_click", c.onClick->value()},
             {"on_touch", b(c.onTouch->value())},
             {"hold", b(c.hold->value())},
@@ -184,9 +186,9 @@ namespace {
         const auto  c = Theme::resolve(s.color);
         auto        e = [](const std::string& v) { return Logic::jsonEscape(v); };
         return std::format(
-            R"({{"enabled":{},"color":"{}","resolved_color":"#{:02x}{:02x}{:02x}","opacity":{},"duration":{},"radius":{},"workspace_radius":"{}","softness":{},"style":"{}","ring_width":{},"sparkle_amount":{},"on_click":"{}","on_touch":{},"hold":{},"on_focus":{},"focus_hover":{},"on_workspace":{},"focus_origin":"{}","bounded":{},"max_ripples":{},"skip_fullscreen":{},"exclude":"{}","pause_when_sharing":{},"sharing":{},"active":{}}})",
+            R"({{"enabled":{},"color":"{}","resolved_color":"#{:02x}{:02x}{:02x}","opacity":{},"duration":{},"radius":{},"workspace_radius":"{}","softness":{},"style":"{}","ring_width":{},"sparkle_amount":{},"distortion":{},"on_click":"{}","on_touch":{},"hold":{},"on_focus":{},"focus_hover":{},"on_workspace":{},"focus_origin":"{}","bounded":{},"max_ripples":{},"skip_fullscreen":{},"exclude":"{}","pause_when_sharing":{},"sharing":{},"active":{}}})",
             s.enabled, e(s.color), (int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255), s.opacity, s.duration, s.radius,
-            e(s.workspaceRadius), s.softness, e(s.style), s.ringWidth, s.sparkleAmount, e(s.onClick), s.onTouch, s.hold, s.onFocus, s.focusHover, s.onWorkspace,
+            e(s.workspaceRadius), s.softness, e(s.style), s.ringWidth, s.sparkleAmount, s.distortion, e(s.onClick), s.onTouch, s.hold, s.onFocus, s.focusHover, s.onWorkspace,
             e(s.focusOrigin), s.bounded, s.maxRipples, s.skipFullscreen, e(s.exclude), s.pauseWhenSharing, sharing(), g_state->ripples.size());
     }
 
@@ -271,8 +273,10 @@ namespace {
                 .seed          = std::uniform_real_distribution<float>(0.f, 137.f)(g_state->rng),
                 .ringWidth     = s.ringWidth,
                 .sparkleAmount = s.sparkleAmount,
+                .distortion    = s.distortion,
                 .softness      = s.softness,
-                .held          = sp.held && s.hold,
+                // waves travel and fade on their own: hold doesn't apply
+                .held          = sp.held && s.hold && !Logic::isWaveMode(Logic::styleMode(s.style)),
                 .holdKey       = sp.holdKey,
         };
         if (sp.clip) {
@@ -764,9 +768,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     c.radius           = addValue<CV::Float>("plugin:hyprripple:radius", "Click ripple radius (logical px)", Config::FLOAT{d.radius});
     c.workspaceRadius  = addValue<CV::String>("plugin:hyprripple:workspace_radius", "'screen' or px", Config::STRING{d.workspaceRadius});
     c.softness         = addValue<CV::Float>("plugin:hyprripple:softness", "Edge feather (logical px)", Config::FLOAT{d.softness});
-    c.style            = addValue<CV::String>("plugin:hyprripple:style", "classic | ring | sparkle", Config::STRING{d.style});
+    c.style            = addValue<CV::String>("plugin:hyprripple:style", "classic | ring | sparkle | negative | water | prism", Config::STRING{d.style});
     c.ringWidth        = addValue<CV::Float>("plugin:hyprripple:ring_width", "Ring thickness (logical px)", Config::FLOAT{d.ringWidth});
     c.sparkleAmount    = addValue<CV::Float>("plugin:hyprripple:sparkle_amount", "Sparkle density 0-1", Config::FLOAT{d.sparkleAmount});
+    c.distortion       = addValue<CV::Float>("plugin:hyprripple:distortion", "Water / prism wave strength 0-1", Config::FLOAT{d.distortion});
     c.onClick          = addValue<CV::String>("plugin:hyprripple:on_click", "none | left | any", Config::STRING{d.onClick});
     c.onTouch          = addValue<CV::Bool>("plugin:hyprripple:on_touch", "Ripple on touchscreen / tablet taps", Config::BOOL{d.onTouch});
     c.hold             = addValue<CV::Bool>("plugin:hyprripple:hold", "Ink grows while held, fades on release", Config::BOOL{d.hold});

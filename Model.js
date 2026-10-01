@@ -35,11 +35,14 @@ var SCHEMA = [
       { value: "selection_background", label: "Selection" }
     ], fallback: "accent" },
   { section: "Look", key: "style", type: "enum", label: "Preset",
-    description: "Classic Material ink, an expanding ring, or Material 3's soft glow with shimmering sparkles. Picking one also sets its opacity, softness and duration.",
+    description: "Ink: Classic, Ring, Sparkle. Screen effects: Negative inverts, Water refracts in a travelling wave, Prism splits into a rainbow shockwave (Opacity = effect strength). Each remembers its own opacity, radius and softness.",
     options: [
       { value: "classic", label: "Classic" },
       { value: "ring", label: "Ring" },
-      { value: "sparkle", label: "Sparkle" }
+      { value: "sparkle", label: "Sparkle" },
+      { value: "negative", label: "Negative" },
+      { value: "water", label: "Water" },
+      { value: "prism", label: "Prism" }
     ], fallback: "classic" },
   { section: "Look", key: "opacity", type: "float", label: "Opacity",
     description: "Peak opacity of the ink. Material uses about 0.12 to 0.3.",
@@ -53,6 +56,9 @@ var SCHEMA = [
   { section: "Look", key: "sparkle_amount", type: "float", label: "Sparkle amount",
     description: "How much shimmering grain the sparkle preset carries. 0 is a plain glow.",
     min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: "sparkle" },
+  { section: "Look", key: "distortion", type: "float", label: "Distortion",
+    description: "How hard the wave bends what's under it.",
+    min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: ["water", "prism"] },
   { section: "Look", key: "ring_width", type: "int", label: "Ring width",
     description: "Thickness of the ring style.", unit: "px",
     min: 1, max: 60, step: 1, fallback: 6, needs: "style", needsValue: "ring" },
@@ -94,7 +100,10 @@ var SECTIONS = ["Triggers", "Look", "Motion", "Exclude"]
 var PRESETS = {
   classic: { opacity: 0.28, radius: 140, softness: 2, duration: 550 },
   ring:    { opacity: 0.5, radius: 140, softness: 1.5, ring_width: 6, duration: 600 },
-  sparkle: { opacity: 0.2, radius: 140, softness: 2, duration: 800 }
+  sparkle: { opacity: 0.2, radius: 140, softness: 2, duration: 800 },
+  negative: { opacity: 1, radius: 140, softness: 2, duration: 600 },
+  water:    { opacity: 0.9, radius: 220, softness: 2, duration: 1100 },
+  prism:    { opacity: 0.9, radius: 240, softness: 2, duration: 900 }
 }
 
 // Values each preset remembers on its own: tweak sparkle's opacity, switch to
@@ -214,13 +223,26 @@ function defaults() {
   return out
 }
 
+// A dependent row shows when its `needs` key has `needsValue` - one value or
+// any of an array of them.
+function needsMet(item, settings) {
+  var have = String(settings[item.needs])
+  var want = item.needsValue
+  if (Array.isArray(want)) {
+    for (var i = 0; i < want.length; i++)
+      if (String(want[i]) === have) return true
+    return false
+  }
+  return String(want) === have
+}
+
 // Rows for one section, master switch first, dependent rows hidden when off.
 function rowsFor(section, settings) {
   var out = []
   for (var i = 0; i < SCHEMA.length; i++) {
     var item = SCHEMA[i]
     if (item.section !== section) continue
-    if (item.needs && settings && String(settings[item.needs]) !== String(item.needsValue)) continue
+    if (item.needs && settings && !needsMet(item, settings)) continue
     if (item.key === "enabled") out.unshift(item)
     else out.push(item)
   }

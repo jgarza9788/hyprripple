@@ -37,7 +37,28 @@ namespace Logic {
             return 1;
         if (style == "sparkle")
             return 2;
+        if (style == "negative")
+            return MODE_NEGATIVE;
+        if (style == "water")
+            return MODE_WATER;
+        if (style == "prism")
+            return MODE_PRISM;
         return 0;
+    }
+
+    bool isSamplingMode(int mode) {
+        return mode >= MODE_NEGATIVE && mode <= MODE_PRISM;
+    }
+
+    bool isWaveMode(int mode) {
+        return mode == MODE_WATER || mode == MODE_PRISM;
+    }
+
+    float waveReach(int mode, float maxRadius, float distortion) {
+        if (!isWaveMode(mode))
+            return 0.f;
+        // must match the shader's amplitude (ripple.frag: waveAmp)
+        return std::clamp(distortion, 0.f, 1.f) * std::clamp(maxRadius * 0.12f, 6.f, 48.f) * (mode == MODE_PRISM ? 1.7f : 1.f);
     }
 
     bool isColorKey(std::string_view v) {
@@ -112,6 +133,8 @@ namespace Logic {
             return asFloat(s.ringWidth, 1.f, 200.f);
         if (key == "sparkle_amount")
             return asFloat(s.sparkleAmount, 0.f, 1.f);
+        if (key == "distortion")
+            return asFloat(s.distortion, 0.f, 1.f);
         if (key == "duration")
             return asInt(s.duration, 50, 5000);
         if (key == "max_ripples")
@@ -123,7 +146,7 @@ namespace Logic {
                 s.style = "classic";
                 return "";
             }
-            return asEnum(s.style, {"classic", "ring", "sparkle"});
+            return asEnum(s.style, {"classic", "ring", "sparkle", "negative", "water", "prism"});
         }
         if (key == "focus_origin")
             return asEnum(s.focusOrigin, {"cursor", "center"});
@@ -210,6 +233,8 @@ namespace Logic {
         const float e = std::clamp(l.elapsed / spreadLen(l), 0.f, 1.f);
         if (l.mode == 2) // M3: start at 20% of the final size
             return 0.2f + 0.8f * m3Ease(e);
+        if (isWaveMode(l.mode)) // waves travel at a near-constant speed
+            return 0.04f + 0.96f * (1.f - (1.f - e) * (1.f - e) * 0.35f - (1.f - e) * 0.65f);
         // Material's standard decelerate, from a small seed
         return 0.08f + 0.92f * (1.f - std::pow(1.f - e, 3.f));
     }

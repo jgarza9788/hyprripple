@@ -36,6 +36,7 @@ struct SRipple {
     float                                 seed          = 0.f; // per-ripple noise offset
     float                                 ringWidth     = 0.f;
     float                                 sparkleAmount = 0.5f;
+    float                                 distortion    = 0.5f; // water / prism wave strength
     float                                 softness      = 2.f;
     bool                                  clip          = false;
     CBox                                  clipBox;              // global logical

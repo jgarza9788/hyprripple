@@ -17,7 +17,7 @@ accent color.
   slides and workspace animations.
 - **Workspace switch**: a wave floods the whole monitor from the cursor.
 
-Three presets (`style`). Picking one in the panel also sets its opacity,
+Six presets (`style`). Picking one in the panel also sets its opacity,
 softness and duration:
 
 - **classic**: Material 2 ink, a near-solid disc with a feathered rim.
@@ -25,6 +25,18 @@ softness and duration:
 - **sparkle**: Material 3 / Android 12. A soft radial glow with a turbulent
   edge and shimmering noise sparkles that trail the wave and dissolve as it
   fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
+- **negative**: the screen under the disc, colour-inverted. Holding keeps it
+  inverted.
+- **water**: the screen refracted by a travelling wave packet, with a faint
+  accent caustic on the crest. `distortion` sets how hard it bends.
+- **prism**: the same wave, but red, green and blue refract by different
+  amounts, giving a rainbow-fringed shockwave with an accent glow.
+
+Negative, water and prism read the frame rendered so far: one GPU copy per
+ripple per frame, only while one is alive. They sample in framebuffer pixel
+space, so they're correct under any monitor rotation (untested on a rotated
+monitor). For these three, Opacity is the effect's strength. Water and prism
+are travelling waves, so they ignore hold.
 
 Each preset remembers its own opacity, radius and edge softness. Tweak
 sparkle, switch to classic and back, and your sparkle values return. Those
@@ -83,12 +95,13 @@ file, and hand edits are picked up live by the service.
 | `focus_hover` | `false` | also on focus-follows-mouse |
 | `on_workspace` | `true` | ripple on workspace switch |
 | `color` | `"accent"` | any `colors.toml` key (`accent`, `foreground`, `color4`...) or `#rrggbb[aa]` |
-| `style` | `"classic"` | `classic` / `ring` / `sparkle` (`fill` still means classic) |
+| `style` | `"classic"` | `classic` / `ring` / `sparkle` / `negative` / `water` / `prism` (`fill` still means classic) |
 | `opacity` | `0.28` | peak ink opacity |
 | `radius` | `140` | click ripple radius, logical px |
 | `softness` | `2` | edge feather, px |
 | `ring_width` | `6` | ring thickness, px |
 | `sparkle_amount` | `0.5` | sparkle grain, 0 (plain glow) to 1 |
+| `distortion` | `0.5` | water / prism wave strength, 0 to 1 |
 | `duration` | `550` | ms |
 | `focus_origin` | `"cursor"` | `cursor` / `center` |
 | `bounded` | `true` | clip click, tap and focus ripples to their window |

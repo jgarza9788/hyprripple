@@ -154,6 +154,26 @@ for (const bad of ["", "classic", "classic,nope", "x,ring", "ring,ring", "a,b,c"
   ok("round trip via service", r.settings.opacity === 0.13 && r.settings.radius === 200 && r.memory.ring.opacity === 0.66);
 }
 
+// screen-effect presets
+for (const st of ["negative", "water", "prism"]) {
+  ok(st + " accepted", M.coerce("style", st).value === st);
+  const a = M.applyPreset(M.defaults(), st);
+  ok(st + " preset defaults", a.style === st && a.opacity === M.PRESETS[st].opacity && a.duration === M.PRESETS[st].duration);
+  ok(st + " style event", M.parseStyleEvent("classic," + st) !== null);
+}
+ok("distortion row for water", M.rowsFor("Look", { style: "water" }).some((i) => i.key === "distortion"));
+ok("distortion row for prism", M.rowsFor("Look", { style: "prism" }).some((i) => i.key === "distortion"));
+ok("no distortion row for negative", !M.rowsFor("Look", { style: "negative" }).some((i) => i.key === "distortion"));
+ok("distortion clamps", M.coerce("distortion", 5).value === 1);
+ok("defaultFor negative opacity", M.defaultFor("opacity", { style: "negative" }) === 1);
+{
+  let st = Object.assign(M.applyPreset(M.defaults(), "negative"), { opacity: 0.7 });
+  let r = M.switchPreset(st, {}, "water");
+  ok("negative -> water applies water", r.settings.opacity === 0.9 && r.settings.radius === 220);
+  r = M.switchPreset(r.settings, r.memory, "negative");
+  ok("water -> negative restores", r.settings.opacity === 0.7);
+}
+
 // hyprctl
 ok("set command bool", M.setCommand("bounded", false).join(" ") === "hyprctl hyprripple set bounded false");
 const batch = M.batchCommand(M.defaults());

@@ -16,6 +16,7 @@ if hl.plugin.hyprripple then
     radius = 140,
     softness = 2,
     sparkle_amount = 0.5,
+    distortion = 0.5,
     ring_width = 6,
     hold = true,
     duration = 550,

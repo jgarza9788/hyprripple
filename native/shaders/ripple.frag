@@ -6,6 +6,16 @@
 //   mode 2  sparkle   Material 3 / Android 12: a soft radial glow with a
 //                     turbulent edge and shimmering noise sparkles that
 //                     trail the wave front and dissolve as it fades
+//   mode 3  negative  the screen under the disc, colour-inverted
+//   mode 4  water     the screen refracted by a travelling wave packet,
+//                     with a faint accent caustic on the crest
+//   mode 5  prism     the same wave, R/G/B refracted by different amounts
+//                     (a rainbow-fringed shockwave) with an accent glow
+//
+// Modes 3-5 read `tex`, a copy of the frame rendered so far. They work in
+// framebuffer pixel space (gl_FragCoord), so sampling is exact under any
+// monitor rotation or flip: the ripple centre in that space is recovered
+// from the screen-space derivatives of v_texcoord.
 //
 // Drawn once per ripple over a square box centred on the ripple, so the
 // centre is always uv (0.5, 0.5) and v_texcoord maps straight to pixels.
@@ -23,7 +33,7 @@ uniform float alpha;       // current opacity (already faded on the CPU)
 uniform vec4  inkColor;    // straight (non-premultiplied) rgba
 uniform float softness;    // edge feather width
 uniform float ringWidth;   // ring thickness, mode 1
-uniform int   mode;        // 0 classic, 1 ring, 2 sparkle
+uniform int   mode;        // 0 classic, 1 ring, 2 sparkle, 3 negative, 4 water, 5 prism
 uniform float progress;    // fade-out: 0 until the ink starts fading, then -> 1
 uniform float sparkleAmount; // 0..1, how many sparkles (mode 2)
 uniform float time;        // seconds since the ripple spawned
@@ -32,6 +42,9 @@ uniform float seed;        // per-ripple random offset
 uniform vec4  clipBox;     // x, y, w, h - only used when useClip == 1
 uniform float clipRadius;  // container corner rounding
 uniform int   useClip;     // 1 = bounded ripple (clipped to its container)
+uniform sampler2D tex;     // modes 3-5: copy of the frame so far
+uniform vec2  fbSize;      // its size in pixels
+uniform float waveAmp;     // modes 4-5: peak displacement, physical px
 
 // Signed distance to a rounded rectangle (negative inside).
 float roundedBoxSDF(vec2 p, vec2 halfSize, float r) {
@@ -103,11 +116,78 @@ float sparkleInk(vec2 px, float dist, float soft) {
     return glow + sparkle * 1.6;
 }
 
+// The background at a framebuffer pixel.
+vec3 bgAt(vec2 fbPx) {
+    return texture(tex, clamp(fbPx / fbSize, vec2(0.0), vec2(1.0))).rgb;
+}
+
+// This fragment's offset from the ripple centre, in framebuffer pixels.
+// v_texcoord is affine across the quad and the centre is uv (0.5, 0.5), so
+// inverting d(uv)/d(fragcoord) maps (uv - 0.5) into framebuffer space -
+// correct whatever rotation/flip the monitor transform applies.
+vec2 fbOffsetFromCenter() {
+    mat2 duv = mat2(dFdx(v_texcoord), dFdy(v_texcoord));
+    return inverse(duv) * (v_texcoord - 0.5);
+}
+
+// Wave packet around the travelling front: a main crest at the radius and a
+// smaller trailing one. Returns (displacement factor, envelope).
+vec2 wavePacket(float dist) {
+    float w    = max(0.15 * radius, 10.0 * pxScale);
+    float k    = 6.2831853 / (w * 0.9);
+    float d1   = dist - radius;
+    float d2   = d1 + 1.6 * w;
+    float e1   = exp(-(d1 / w) * (d1 / w));
+    float e2   = 0.5 * exp(-(d2 / w) * (d2 / w));
+    float wave = sin(d1 * k) * e1 + sin(d2 * k) * e2;
+    return vec2(wave, max(e1, e2));
+}
+
 void main() {
     vec2  px   = boxPos + v_texcoord * boxSize;
     float dist = distance(px, center);
     float soft = max(softness, 0.5);
 
+    float clipMask = 1.0;
+    if (useClip == 1) {
+        vec2  half_ = clipBox.zw * 0.5;
+        float sdf   = roundedBoxSDF(px - (clipBox.xy + half_), half_, clipRadius);
+        clipMask    = 1.0 - smoothstep(-0.75, 0.75, sdf);
+    }
+
+    // ---- screen-sampling modes ------------------------------------------
+    if (mode >= 3) {
+        vec2  frag = gl_FragCoord.xy;
+        vec2  rel  = fbOffsetFromCenter();
+        vec2  dir  = rel / max(length(rel), 0.0001);
+        vec3  color;
+        float mask;
+
+        if (mode == 3) {
+            mask  = 1.0 - smoothstep(radius - soft, radius + soft, dist);
+            color = vec3(1.0) - clamp(bgAt(frag), 0.0, 1.0);
+        } else {
+            vec2  wp     = wavePacket(dist);
+            vec2  offset = dir * waveAmp * wp.x;
+            float crest  = max(wp.x, 0.0);
+            mask         = clamp(wp.y * 1.6, 0.0, 1.0);
+            if (mode == 4) {
+                color = bgAt(frag - offset) + inkColor.rgb * crest * crest * 0.35;
+            } else {
+                color = vec3(bgAt(frag - offset).r, bgAt(frag - offset * 1.35).g, bgAt(frag - offset * 1.7).b);
+                float glow = exp(-pow((dist - radius) / max(0.05 * radius, 3.0 * pxScale), 2.0));
+                color += inkColor.rgb * glow * 0.3;
+            }
+        }
+
+        float a = clamp(mask * clipMask * alpha, 0.0, 1.0);
+        if (a <= 0.001)
+            discard;
+        fragColor = vec4(clamp(color, 0.0, 1.0) * a, a);
+        return;
+    }
+
+    // ---- ink modes --------------------------------------------------------
     float ink;
     if (mode == 1)
         ink = ringInk(dist, soft);
@@ -116,13 +196,7 @@ void main() {
     else
         ink = classicInk(dist, soft);
 
-    if (useClip == 1) {
-        vec2  half_ = clipBox.zw * 0.5;
-        float sdf   = roundedBoxSDF(px - (clipBox.xy + half_), half_, clipRadius);
-        ink *= 1.0 - smoothstep(-0.75, 0.75, sdf);
-    }
-
-    float a = clamp(ink * alpha * inkColor.a, 0.0, 1.0);
+    float a = clamp(ink * clipMask * alpha * inkColor.a, 0.0, 1.0);
     if (a <= 0.001)
         discard;
 

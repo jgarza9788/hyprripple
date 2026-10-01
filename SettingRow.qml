@@ -36,6 +36,8 @@ Item {
 
   readonly property bool isBool: item.type === "bool"
   readonly property bool isEnum: item.type === "enum"
+  // Too many choices to sit beside the label: chips get their own line.
+  readonly property bool wideEnum: isEnum && (item.options || []).length > 4
   readonly property bool isSlider: item.type === "int" || item.type === "float"
   readonly property bool isColor: item.type === "color"
   readonly property bool isText: item.type === "string" || item.type === "text"
@@ -76,7 +78,7 @@ Item {
     id: labels
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
-    width: Math.round(parent.width * 0.42)
+    width: root.wideEnum ? parent.width - resetSlot.width - Style.spacing.lg : Math.round(parent.width * 0.42)
     spacing: Style.spacing.xxs
 
     Row {
@@ -110,6 +112,23 @@ Item {
       color: Qt.darker(root.foreground, 1.55)
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
+    }
+
+    // Wide pickers (Preset) sit under their label, full width.
+    Item {
+      visible: root.wideEnum
+      width: 1
+      height: Style.spacing.sm
+    }
+
+    ButtonGroup {
+      visible: root.wideEnum
+      options: root.wideEnum ? root.item.options : []
+      value: String(root.value)
+      foreground: root.foreground
+      accent: root.accent
+      focusable: false
+      onChanged: function(v) { root.committed(v) }
     }
   }
 
@@ -177,7 +196,7 @@ Item {
     }
 
     ButtonGroup {
-      visible: root.isEnum
+      visible: root.isEnum && !root.wideEnum
       options: root.isEnum ? root.item.options : []
       value: String(root.value)
       foreground: root.foreground

@@ -22,6 +22,7 @@ class CRipplePassElement : public IPassElement {
     bool                          needsPrecomputeBlur() override { return false; }
     std::optional<CBox>           boundingBox() override;
     CRegion                       opaqueRegion() override { return {}; }
+    bool                          disableSimplification() override;
 
     const char*      passName() override { return "CRipplePassElement"; }
     ePassElementType type() override { return EK_CUSTOM; }

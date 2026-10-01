@@ -101,6 +101,36 @@ int main() {
         ok("zero duration is safe", finished(zero) && std::isfinite(spreadFraction(zero)));
     }
 
+    // ── sampling presets ─────────────────────────────────────────────────────
+    {
+        Settings s;
+        ok("negative style", applySetting(s, "style", "negative").empty() && styleMode(s.style) == MODE_NEGATIVE);
+        ok("water style", applySetting(s, "style", "water").empty() && styleMode(s.style) == MODE_WATER);
+        ok("prism style", applySetting(s, "style", "prism").empty() && styleMode(s.style) == MODE_PRISM);
+        ok("distortion clamps", applySetting(s, "distortion", "9").empty() && s.distortion == 1.f);
+        ok("distortion rejects text", !applySetting(s, "distortion", "lots").empty());
+        ok("sampling modes", isSamplingMode(3) && isSamplingMode(4) && isSamplingMode(5) && !isSamplingMode(0) && !isSamplingMode(2));
+        ok("wave modes", isWaveMode(4) && isWaveMode(5) && !isWaveMode(3));
+        ok("no reach for non-waves", waveReach(0, 200, 1) == 0.f && waveReach(3, 200, 1) == 0.f);
+        ok("reach grows with distortion", waveReach(4, 200, 1) > waveReach(4, 200, 0.2f) && waveReach(4, 200, 0) == 0.f);
+        ok("reach capped", waveReach(5, 1e6f, 1) <= 48.f * 1.7f + 1e-3f);
+
+        bool  mono = true;
+        float prev = -1;
+        for (int i = 0; i <= 100; ++i) {
+            Life w{.mode = MODE_WATER, .duration = 1.f, .elapsed = i / 100.f};
+            const float f = spreadFraction(w);
+            mono &= f >= prev - 1e-6f;
+            prev = f;
+        }
+        ok("water spreads monotonically", mono);
+        Life w0{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.f};
+        Life w1{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.7f};
+        ok("water starts small, reaches full", spreadFraction(w0) < 0.05f && near(spreadFraction(w1), 1.f));
+        Life wEnd{.mode = MODE_WATER, .duration = 1.f, .elapsed = 1.01f};
+        ok("water finishes", finished(wEnd));
+    }
+
     // ── geometry ─────────────────────────────────────────────────────────────
     {
         const Rect r{100, 100, 200, 100};
