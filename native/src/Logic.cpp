@@ -261,6 +261,12 @@ namespace Logic {
         return std::clamp(opacity, 0.f, 1.f) * in * out;
     }
 
+    float waveDecay(const Life& l) {
+        const float t = std::clamp(l.elapsed / duration(l), 0.f, 1.f);
+        const float x = std::clamp((t - 0.3f) / 0.7f, 0.f, 1.f);
+        return 1.f - x * x * (3.f - 2.f * x);
+    }
+
     bool finished(const Life& l) {
         return fade(l) >= 1.f;
     }

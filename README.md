@@ -39,7 +39,9 @@ Negative, water and prism read the frame rendered so far: one GPU copy per
 ripple per frame, only while one is alive. They sample in framebuffer pixel
 space, so they're correct under any monitor rotation (untested on a rotated
 monitor). For these three, Opacity is the effect's strength. Water and prism
-are travelling waves, so they ignore hold.
+are travelling waves, so they ignore hold. Their bend stays at full strength
+for the first 30% of the ripple's life, then eases smoothly to zero at the
+end, so the surface settles before the ripple fades away.
 
 Each preset remembers its own opacity, radius and edge softness. Tweak
 sparkle, switch to classic and back, and your sparkle values return. Those

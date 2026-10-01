@@ -16,7 +16,7 @@ namespace {
         ;
 
     struct SUniforms {
-        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, mode = -1, progress = -1, time = -1, pxScale = -1, seed = -1, sparkleAmount = -1, tex = -1, fbSize = -1, waveAmp = -1, clipBox = -1, clipRadius = -1, useClip = -1;
+        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, mode = -1, progress = -1, time = -1, pxScale = -1, seed = -1, sparkleAmount = -1, tex = -1, fbSize = -1, waveAmp = -1, waveDecay = -1, clipBox = -1, clipRadius = -1, useClip = -1;
     };
 
     SP<CShader>              s_shader;
@@ -86,6 +86,7 @@ namespace {
         s_u.tex        = glGetUniformLocation(p, "tex");
         s_u.fbSize     = glGetUniformLocation(p, "fbSize");
         s_u.waveAmp    = glGetUniformLocation(p, "waveAmp");
+        s_u.waveDecay  = glGetUniformLocation(p, "waveDecay");
         s_u.clipBox    = glGetUniformLocation(p, "clipBox");
         s_u.clipRadius = glGetUniformLocation(p, "clipRadius");
         s_u.useClip    = glGetUniformLocation(p, "useClip");
@@ -159,6 +160,7 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
         glUniform2f(s_u.fbSize, s_sample->m_size.x, s_sample->m_size.y);
         // Base amplitude; prism's widest channel reaches 2x (see waveReach).
         glUniform1f(s_u.waveAmp, Logic::waveReach(Logic::MODE_WATER, rp.maxRadius, rp.distortion) * scale);
+        glUniform1f(s_u.waveDecay, m_data.decay);
     }
 
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, proj.getMatrix());

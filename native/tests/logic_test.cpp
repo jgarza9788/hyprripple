@@ -140,6 +140,23 @@ int main() {
                 gentle &= alpha(a, 1.f) - alpha(b, 1.f) <= 0.04f;
         }
         ok("water fade is gentle", gentle);
+
+        Life d0{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.f};
+        Life d3{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.3f};
+        Life dEnd{.mode = MODE_PRISM, .duration = 1.f, .elapsed = 1.f};
+        ok("distortion full at start", waveDecay(d0) == 1.f && waveDecay(d3) == 1.f);
+        ok("distortion zero at end", waveDecay(dEnd) == 0.f);
+        bool down = true, smooth = true;
+        for (int i = 1; i <= 100; ++i) {
+            Life a{.mode = MODE_WATER, .duration = 1.f, .elapsed = (i - 1) / 100.f};
+            Life b{.mode = MODE_WATER, .duration = 1.f, .elapsed = i / 100.f};
+            down &= waveDecay(b) <= waveDecay(a);
+            smooth &= waveDecay(a) - waveDecay(b) <= 0.025f; // no jumps
+        }
+        ok("distortion decays monotonically", down);
+        ok("distortion decays smoothly", smooth);
+        Life dLate{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.97f};
+        ok("distortion eases into zero", waveDecay(dLate) < 0.01f);
         Life cl{.mode = 0, .duration = 1.f, .elapsed = 0.7f};
         ok("classic timing unchanged", near(spreadFraction(cl), 1.f));
         Life wEnd{.mode = MODE_WATER, .duration = 1.f, .elapsed = 1.01f};

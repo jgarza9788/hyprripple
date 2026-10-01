@@ -80,6 +80,10 @@ namespace Logic {
     float spreadFraction(const Life& l); // current radius / max radius
     float fade(const Life& l);           // 0 until the fade starts, then -> 1
     float alpha(const Life& l, float opacity);
+    // Water / prism: how much of the bend is left. 1 for the first 30% of
+    // the life, then eases smoothly to exactly 0 at the end, so the surface
+    // settles before the ripple disappears.
+    float waveDecay(const Life& l);
     bool  finished(const Life& l);
 
     // Material 3 standard easing, cubic-bezier(0.2, 0, 0, 1).

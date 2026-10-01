@@ -395,6 +395,7 @@ namespace {
                 .alpha  = Logic::alpha(life, r.opacity),
                 .fade   = Logic::fade(life),
                 .time   = life.elapsed,
+                .decay  = Logic::waveDecay(life),
             }));
         }
         if (drew)

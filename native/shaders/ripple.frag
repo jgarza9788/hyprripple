@@ -47,6 +47,7 @@ uniform int   useClip;     // 1 = bounded ripple (clipped to its container)
 uniform sampler2D tex;     // modes 3-5: copy of the frame so far
 uniform vec2  fbSize;      // its size in pixels
 uniform float waveAmp;     // modes 4-5: peak displacement, physical px
+uniform float waveDecay;   // modes 4-5: remaining bend, 1 -> 0 over the life
 
 // Signed distance to a rounded rectangle (negative inside).
 float roundedBoxSDF(vec2 p, vec2 halfSize, float r) {
@@ -189,14 +190,14 @@ void main() {
         } else if (mode == 4) {
             vec2  wp     = waterWaves(dist);
             // a gentle bend: 60% of the wave reach budget
-            vec2  offset = dir * waveAmp * 0.6 * wp.x;
+            vec2  offset = dir * waveAmp * waveDecay * 0.6 * wp.x;
             float crest  = max(wp.x, 0.0);
             mask         = clamp(wp.y * 1.3, 0.0, 1.0);
             // colourless water: just a whisper of light on the crests
             color = bgAt(frag - offset) + vec3(crest * crest * 0.08);
         } else {
             vec2 lp     = prismLens(dist);
-            vec2 offset = dir * waveAmp * lp.x;
+            vec2 offset = dir * waveAmp * waveDecay * lp.x;
             mask        = clamp(lp.y * 1.4, 0.0, 1.0);
             color = vec3(bgAt(frag - offset).r, bgAt(frag - offset * 1.5).g, bgAt(frag - offset * 2.0).b);
             // spectral light spread around the band, slowly rotating, so it

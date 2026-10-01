@@ -12,6 +12,7 @@ class CRipplePassElement : public IPassElement {
         float   alpha  = 0.f; // this frame
         float   fade   = 0.f; // 0 until the fade-out starts, then -> 1
         float   time   = 0.f; // seconds since spawn
+        float   decay  = 1.f; // water / prism: remaining bend, 1 -> 0
     };
 
     explicit CRipplePassElement(const SData& data);
