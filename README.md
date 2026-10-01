@@ -4,6 +4,9 @@ Material Design ink ripples drawn by Hyprland itself, in your Omarchy theme's
 accent color.
 
 - **Click**: ink spreads from where you press (left button or any button).
+  Like Material, it keeps spreading while you hold the button and fades when
+  you let go. A quick click is a quick splash.
+- **Touch & pen**: the same for touchscreen taps and tablet pens.
 - **Window focus**: a bounded ripple floods the newly focused window, clipped to
   its rounded corners. Fires on keyboard focus, new windows and closed windows.
   Hover focus (`follow_mouse`) is opt-in, and starts on the edge the mouse
@@ -64,6 +67,8 @@ file, and hand edits are picked up live by the service.
 |---|---|---|
 | `enabled` | `true` | master switch |
 | `on_click` | `"left"` | `none` / `left` / `any` |
+| `on_touch` | `true` | touchscreen / tablet pen taps |
+| `hold` | `true` | ink grows while held, fades on release (max 8 s) |
 | `on_focus` | `true` | ripple on focus change |
 | `focus_hover` | `false` | also on focus-follows-mouse |
 | `on_workspace` | `true` | ripple on workspace switch |
@@ -73,11 +78,15 @@ file, and hand edits are picked up live by the service.
 | `radius` | `140` | click ripple radius, logical px |
 | `softness` | `2` | edge feather, px |
 | `ring_width` | `6` | ring thickness, px |
+| `sparkle_amount` | `0.5` | sparkle grain, 0 (plain glow) to 1 |
 | `duration` | `550` | ms |
 | `focus_origin` | `"cursor"` | `cursor` / `center` |
 | `bounded` | `true` | clip focus ripples to the window |
 | `workspace_radius` | `"screen"` | `screen` or px |
 | `max_ripples` | `16` | oldest are dropped past this |
+| `skip_fullscreen` | `true` | no ripples on a monitor showing a fullscreen window |
+| `pause_when_sharing` | `false` | no ripples while screen sharing / recording |
+| `exclude` | `""` | window classes that never ripple: comma-separated, `*` / `?` globs |
 
 Theme colors are resolved from
 `~/.local/state/omarchy/current/theme/colors.toml` each time a ripple
@@ -89,7 +98,7 @@ spawns, so a theme switch recolors ripples with no reload.
 hyprctl hyprripple get                    # current settings (JSON)
 hyprctl hyprripple set opacity 0.2        # live, no reload
 hyprctl hyprripple trigger [x y [radius]] # ripple now (cursor if no x y)
-hyprctl hyprripple stats                  # spawn counters per trigger
+hyprctl hyprripple stats                  # counters, frames drawn, live ripples
 ```
 
 From Lua, for example in a bind:
@@ -98,8 +107,35 @@ From Lua, for example in a bind:
 Hyprland's Lua parser rejects `hyprctl keyword`, which is why the panel talks
 to the plugin's own `hyprripple set` command.
 
+## Panel keys
+
+Tab switches section. ↑↓ or j/k move between rows. ←→ or h/l change the value.
+Enter/Space toggles, or edits a text field. Backspace resets the row. T fires
+a test ripple. Esc closes.
+
 ## Tests
 
 ```sh
-node tests/model.test.js
+make test   # C++ logic tests (ASan + UBSan) and the panel model tests
 ```
+
+## Security notes
+
+- Every way into the settings (hyprctl, Lua, `hyprripple.lua`, the panel)
+  goes through the same whitelist validation (`native/src/Logic.cpp`,
+  `Model.js`):
+  - numbers are clamped
+  - enums are checked
+  - colors must be `#hex` or a theme key
+  - `exclude` allows only `[A-Za-z0-9._-*?, ]`
+
+  Nothing that reaches `hyprctl --batch` or the generated Lua can carry `;`,
+  quotes or newlines.
+- `hyprctl hyprripple get` output is JSON-escaped.
+- `colors.toml` is only read if it's a regular file under 64 KiB, and only its
+  first 512 lines.
+- Class globs are matched without regex, in linear-ish time, so a hostile
+  pattern can't stall the compositor.
+- Held ripples give up after 8 s, and there are at most `max_ripples` (≤ 64).
+- `hyprctl hyprripple` is reachable by any process that can talk to
+  Hyprland's socket, the same as the rest of `hyprctl`.

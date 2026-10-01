@@ -14,10 +14,19 @@ Item {
   property color accent: Color.accent
   property color swatch: "transparent"   // resolved ink color, color rows only
   property string fontFamily: Style.font.family
+  property bool hasCursor: false            // keyboard cursor is on this row
 
   signal edited(var value)
   signal committed(var value)
   signal reset()
+  signal focusRequested()
+  signal doneEditing()     // a text field gave up focus (Enter / Esc)
+
+  // Keyboard: Enter on a text or color row edits its field.
+  function editField() {
+    if (isText) textField.forceActiveFocus()
+    else if (isColor) colorField.forceActiveFocus()
+  }
 
   // Differs from the schema default -> show the reset button and the pip.
   readonly property bool modified: String(value) !== String(item.fallback)
@@ -26,7 +35,7 @@ Item {
   readonly property bool isEnum: item.type === "enum"
   readonly property bool isSlider: item.type === "int" || item.type === "float"
   readonly property bool isColor: item.type === "color"
-  readonly property bool isText: item.type === "string"
+  readonly property bool isText: item.type === "string" || item.type === "text"
   readonly property bool isPresetColor: {
     if (!isColor) return false
     for (var i = 0; i < item.options.length; i++)
@@ -42,6 +51,23 @@ Item {
   }
 
   implicitHeight: Math.max(labels.implicitHeight, control.implicitHeight) + Style.spacing.xl
+
+  // Keyboard cursor highlight; hovering a row moves the cursor to it.
+  Rectangle {
+    anchors.fill: parent
+    anchors.leftMargin: -Style.spacing.md
+    anchors.rightMargin: -Style.spacing.md
+    radius: Style.cornerRadius
+    color: root.hasCursor ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+    Behavior on color { ColorAnimation { duration: 100 } }
+  }
+
+  MouseArea {
+    anchors.fill: parent
+    acceptedButtons: Qt.NoButton
+    hoverEnabled: true
+    onEntered: root.focusRequested()
+  }
 
   Column {
     id: labels
@@ -185,8 +211,9 @@ Item {
           placeholderText: "#rrggbb"
           foreground: root.foreground
           accent: root.accent
-          onAccepted: root.committed(text)
+          onAccepted: { root.committed(text); root.doneEditing() }
           onEditingFinished: if (text !== "" && text !== String(root.value)) root.committed(text)
+          Keys.onEscapePressed: root.doneEditing()
         }
       }
 
@@ -201,14 +228,17 @@ Item {
     }
 
     TextField {
+      id: textField
       visible: root.isText
-      width: Style.space(130)
+      width: root.item.type === "text" ? Style.space(220) : Style.space(130)
       text: root.isText ? String(root.value) : ""
+      placeholderText: root.item.placeholder || ""
       foreground: root.foreground
       accent: root.accent
       anchors.verticalCenter: parent.verticalCenter
-      onAccepted: root.committed(text)
+      onAccepted: { root.committed(text); root.doneEditing() }
       onEditingFinished: if (text !== String(root.value)) root.committed(text)
+      Keys.onEscapePressed: root.doneEditing()
     }
   }
 }

@@ -24,12 +24,14 @@ Item {
   property var settings: Model.defaults()
   property var status: null          // `hyprctl hyprripple get`, null = plugin not loaded
   property int sectionIndex: 0
+  property int cursorIndex: 0
   property string errorText: ""
   property string statusText: ""
   property bool selfWrite: false
 
   readonly property string section: Model.SECTIONS[sectionIndex]
   readonly property var rows: Model.rowsFor(section, settings)
+  onRowsChanged: if (cursorIndex >= rows.length) cursorIndex = Math.max(0, rows.length - 1)
   readonly property bool pluginLoaded: status !== null
 
   property color background: Color.menu.background
@@ -140,6 +142,43 @@ Item {
     persistNow()
   }
 
+  // ------------------------------------------------------------- keyboard
+
+  function moveSection(delta) {
+    var n = Model.SECTIONS.length
+    root.sectionIndex = (root.sectionIndex + delta + n) % n
+    root.cursorIndex = 0
+  }
+
+  function moveCursor(delta) {
+    var n = root.rows.length
+    if (n === 0) return
+    root.cursorIndex = (root.cursorIndex + delta + n) % n
+    rowList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+  }
+
+  function cursorItem() {
+    return root.cursorIndex >= 0 && root.cursorIndex < root.rows.length ? root.rows[root.cursorIndex] : null
+  }
+
+  function nudgeCursor(direction) {
+    var item = cursorItem()
+    if (!item) return
+    var next = Model.nudge(item, root.settings[item.key], direction)
+    if (String(next) !== String(root.settings[item.key])) setValue(item.key, next, true)
+  }
+
+  function activateCursor() {
+    var item = cursorItem()
+    if (!item) return
+    if (item.type === "bool") setValue(item.key, root.settings[item.key] !== true, true)
+    else if (item.type === "enum" || item.type === "color") nudgeCursor(1)
+    else if (item.type === "text" || item.type === "string") {
+      var row = rowList.itemAtIndex(root.cursorIndex)
+      if (row) row.editField()
+    }
+  }
+
   function test() {
     Quickshell.execDetached(["hyprctl", "hyprripple", "trigger"])
   }
@@ -246,17 +285,26 @@ Item {
         id: keyCatcher
         anchors.fill: parent
         focus: true
+        // Arrows or hjkl (unmodified, so Ctrl+L etc. stay with the
+        // compositor). Text fields take their own keys while focused; Esc or
+        // Enter hands focus back here.
         Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) { root.dismiss(); event.accepted = true }
-          else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-            var back = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
-            var n = Model.SECTIONS.length
-            root.sectionIndex = (root.sectionIndex + (back ? -1 : 1) + n) % n
-            event.accepted = true
+          var vim = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+          if (event.key === Qt.Key_Escape) root.dismiss()
+          else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+            root.moveSection(event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1)
+          else if (event.key === Qt.Key_Down || (vim && event.key === Qt.Key_J)) root.moveCursor(1)
+          else if (event.key === Qt.Key_Up || (vim && event.key === Qt.Key_K)) root.moveCursor(-1)
+          else if (event.key === Qt.Key_Right || (vim && event.key === Qt.Key_L)) root.nudgeCursor(1)
+          else if (event.key === Qt.Key_Left || (vim && event.key === Qt.Key_H)) root.nudgeCursor(-1)
+          else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) root.activateCursor()
+          else if (event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) {
+            var item = root.cursorItem()
+            if (item) root.resetValue(item.key)
           }
-          else if (event.key === Qt.Key_T && !(event.modifiers & Qt.ControlModifier)) {
-            root.test(); event.accepted = true
-          }
+          else if (vim && event.key === Qt.Key_T) root.test()
+          else return
+          event.accepted = true
         }
       }
 
@@ -348,12 +396,13 @@ Item {
           foreground: root.foreground
           accent: root.accent
           focusable: false
-          onChanged: function(v) { root.sectionIndex = Math.max(0, Model.SECTIONS.indexOf(v)) }
+          onChanged: function(v) { root.sectionIndex = Math.max(0, Model.SECTIONS.indexOf(v)); root.cursorIndex = 0 }
         }
 
         PanelSeparator { Layout.fillWidth: true }
 
         ListView {
+          id: rowList
           Layout.fillWidth: true
           Layout.fillHeight: true
           clip: true
@@ -363,6 +412,7 @@ Item {
 
           delegate: SettingRow {
             required property var modelData
+            required property int index
             width: ListView.view.width
             item: modelData
             value: root.settings[modelData.key]
@@ -374,12 +424,15 @@ Item {
             onEdited: function(v) { root.setValue(modelData.key, v, false) }
             onCommitted: function(v) { root.setValue(modelData.key, v, true) }
             onReset: root.resetValue(modelData.key)
+            hasCursor: index === root.cursorIndex
+            onFocusRequested: root.cursorIndex = index
+            onDoneEditing: keyCatcher.forceActiveFocus()
           }
         }
 
         Text {
           Layout.fillWidth: true
-          text: root.errorText !== "" ? root.errorText : "Tab: section · T: test ripple · Esc: close"
+          text: root.errorText !== "" ? root.errorText : "Tab: section · ↑↓/jk: row · ←→/hl: change · Enter: toggle · ⌫: reset row · T: test · Esc: close"
           color: root.errorText !== "" ? Color.urgent : Qt.darker(root.foreground, 1.6)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

@@ -17,6 +17,8 @@ var SCHEMA = [
       { value: "left", label: "Left" },
       { value: "any", label: "Any button" }
     ], fallback: "left" },
+  { section: "Triggers", key: "on_touch", type: "bool", label: "Touch & pen",
+    description: "Ripple where a finger or tablet pen touches down.", fallback: true },
   { section: "Triggers", key: "on_focus", type: "bool", label: "Window focus",
     description: "Ripple across a window when it takes focus from a keybind, a new window or a closed one.", fallback: true },
   { section: "Triggers", key: "focus_hover", type: "bool", label: "Hover focus",
@@ -48,10 +50,15 @@ var SCHEMA = [
   { section: "Look", key: "softness", type: "float", label: "Edge softness",
     description: "Feathering on the ink's edge.", unit: "px",
     min: 0, max: 40, step: 0.5, decimals: 1, fallback: 2 },
+  { section: "Look", key: "sparkle_amount", type: "float", label: "Sparkle amount",
+    description: "How much shimmering grain the sparkle preset carries. 0 is a plain glow.",
+    min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: "sparkle" },
   { section: "Look", key: "ring_width", type: "int", label: "Ring width",
     description: "Thickness of the ring style.", unit: "px",
     min: 1, max: 60, step: 1, fallback: 6, needs: "style", needsValue: "ring" },
 
+  { section: "Motion", key: "hold", type: "bool", label: "Grow while held",
+    description: "Like Material: ink keeps spreading while you hold the button and fades when you let go. Off = every ripple runs for Duration.", fallback: true },
   { section: "Motion", key: "duration", type: "int", label: "Duration",
     description: "Life of one ripple, spread and fade.", unit: "ms",
     min: 150, max: 2000, step: 25, fallback: 550 },
@@ -69,11 +76,19 @@ var SCHEMA = [
     description: "Older ripples are dropped past this many.",
     min: 1, max: 64, step: 1, fallback: 16 },
 
+  { section: "Exclude", key: "skip_fullscreen", type: "bool", label: "Skip fullscreen",
+    description: "No ripples on a monitor showing a fullscreen window: games, video.", fallback: true },
+  { section: "Exclude", key: "pause_when_sharing", type: "bool", label: "Pause while sharing",
+    description: "No ripples while the screen is being shared or recorded.", fallback: false },
+  { section: "Exclude", key: "exclude", type: "text", label: "Excluded apps",
+    description: "Window classes that never ripple, comma-separated. * and ? wildcards, e.g. steam_app_*, mpv",
+    placeholder: "steam_app_*, mpv", fallback: "" },
+
   { section: "Triggers", key: "enabled", type: "bool", label: "Enabled",
     description: "Master switch for every trigger.", fallback: true }
 ]
 
-var SECTIONS = ["Triggers", "Look", "Motion"]
+var SECTIONS = ["Triggers", "Look", "Motion", "Exclude"]
 
 // What picking a preset sets alongside `style`. Everything stays tweakable.
 var PRESETS = {
@@ -119,7 +134,10 @@ function rowsFor(section, settings) {
 }
 
 var HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
-var KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+var KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+// Same whitelist the native plugin enforces: nothing that could break out of
+// a Lua string or chain another command in `hyprctl --batch`.
+var EXCLUDE_RE = /^[A-Za-z0-9._\-*?, ]{0,512}$/
 
 // Validate/normalise one value. Returns { ok, value } or { ok: false, error }.
 function coerce(key, raw) {
@@ -159,11 +177,16 @@ function coerce(key, raw) {
   if (key === "workspace_radius") {
     if (s === "" || s === "screen") return { ok: true, value: "screen" }
     var r = Number(s)
-    if (isFinite(r) && r > 0) return { ok: true, value: String(Math.round(r)) }
+    if (isFinite(r) && r > 0) return { ok: true, value: String(Math.round(Math.max(10, Math.min(20000, r)))) }
     return { ok: false, error: "workspace_radius must be 'screen' or a number" }
   }
 
-  return { ok: true, value: s }
+  if (key === "exclude") {
+    if (EXCLUDE_RE.test(s)) return { ok: true, value: s }
+    return { ok: false, error: "excluded apps: only letters, digits, . _ - * ? and commas" }
+  }
+
+  return { ok: false, error: "unsupported setting " + key }
 }
 
 // Fill gaps with defaults and drop anything invalid.
@@ -182,7 +205,35 @@ function normalize(settings) {
 function luaValue(v) {
   if (typeof v === "boolean") return v ? "true" : "false"
   if (typeof v === "number") return String(v)
-  return '"' + String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'
+  return '"' + String(v)
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/[\x00-\x1f]/g, "") + '"'
+}
+
+// Keyboard: what Left (-1) / Right (+1) does to a row's value.
+function nudge(item, value, direction) {
+  if (!item) return value
+  if (item.type === "bool") return direction > 0
+  if (item.type === "enum" || item.type === "color") {
+    var options = item.options || []
+    if (options.length === 0) return value
+    var at = -1
+    for (var i = 0; i < options.length; i++)
+      if (String(options[i].value) === String(value)) at = i
+    if (at < 0) return options[direction > 0 ? 0 : options.length - 1].value
+    return options[(at + direction + options.length) % options.length].value
+  }
+  if (item.type === "int" || item.type === "float") {
+    var step = item.step === undefined ? 1 : item.step
+    var n = Number(value) + step * (direction > 0 ? 1 : -1)
+    n = Math.max(item.min, Math.min(item.max, n))
+    // keep float steps from drifting (0.1 + 0.2 ...)
+    return parseFloat(n.toFixed(item.type === "int" ? 0 : (item.decimals === undefined ? 2 : item.decimals)))
+  }
+  return value
 }
 
 function renderLua(settings) {
@@ -265,6 +316,7 @@ if (typeof module !== "undefined") {
     SCHEMA: SCHEMA,
     SECTIONS: SECTIONS,
     PRESETS: PRESETS,
+    nudge: nudge,
     applyPreset: applyPreset,
     itemFor: itemFor,
     defaults: defaults,

@@ -6,6 +6,7 @@
 if hl.plugin.hyprripple then
   hl.config({ plugin = { hyprripple = {
     on_click = "left",
+    on_touch = true,
     on_focus = true,
     focus_hover = false,
     on_workspace = true,
@@ -14,12 +15,17 @@ if hl.plugin.hyprripple then
     opacity = 0.28,
     radius = 140,
     softness = 2,
+    sparkle_amount = 0.5,
     ring_width = 6,
+    hold = true,
     duration = 550,
     focus_origin = "cursor",
     bounded = true,
     workspace_radius = "screen",
     max_ripples = 16,
+    skip_fullscreen = true,
+    pause_when_sharing = false,
+    exclude = "",
     enabled = true,
   } } })
 end

@@ -10,7 +10,7 @@ class CRipplePassElement : public IPassElement {
         SRipple ripple;
         float   radius = 0.f; // logical, this frame
         float   alpha  = 0.f; // this frame
-        float   t      = 0.f; // life progress 0..1
+        float   fade   = 0.f; // 0 until the fade-out starts, then -> 1
         float   time   = 0.f; // seconds since spawn
     };
 

@@ -14,7 +14,7 @@ namespace {
         ;
 
     struct SUniforms {
-        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, mode = -1, progress = -1, time = -1, pxScale = -1, seed = -1, clipBox = -1, clipRadius = -1, useClip = -1;
+        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, mode = -1, progress = -1, time = -1, pxScale = -1, seed = -1, sparkleAmount = -1, clipBox = -1, clipRadius = -1, useClip = -1;
     };
 
     SP<CShader> s_shader;
@@ -48,6 +48,7 @@ namespace {
         s_u.time       = glGetUniformLocation(p, "time");
         s_u.pxScale    = glGetUniformLocation(p, "pxScale");
         s_u.seed       = glGetUniformLocation(p, "seed");
+        s_u.sparkleAmount = glGetUniformLocation(p, "sparkleAmount");
         s_u.clipBox    = glGetUniformLocation(p, "clipBox");
         s_u.clipRadius = glGetUniformLocation(p, "clipRadius");
         s_u.useClip    = glGetUniformLocation(p, "useClip");
@@ -111,7 +112,8 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
     glUniform1f(s_u.softness, rp.softness * scale);
     glUniform1f(s_u.ringWidth, std::max(rp.ringWidth, 1.f) * scale);
     glUniform1i(s_u.mode, rp.mode);
-    glUniform1f(s_u.progress, m_data.t);
+    glUniform1f(s_u.progress, m_data.fade);
+    glUniform1f(s_u.sparkleAmount, rp.sparkleAmount);
     glUniform1f(s_u.time, m_data.time);
     glUniform1f(s_u.pxScale, scale);
     glUniform1f(s_u.seed, rp.seed);

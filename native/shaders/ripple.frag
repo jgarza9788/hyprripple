@@ -24,7 +24,8 @@ uniform vec4  inkColor;    // straight (non-premultiplied) rgba
 uniform float softness;    // edge feather width
 uniform float ringWidth;   // ring thickness, mode 1
 uniform int   mode;        // 0 classic, 1 ring, 2 sparkle
-uniform float progress;    // 0..1 over the ripple's life
+uniform float progress;    // fade-out: 0 until the ink starts fading, then -> 1
+uniform float sparkleAmount; // 0..1, how many sparkles (mode 2)
 uniform float time;        // seconds since the ripple spawned
 uniform float pxScale;     // monitor scale, keeps sparkle grain size logical
 uniform float seed;        // per-ripple random offset
@@ -93,10 +94,11 @@ float sparkleInk(vec2 px, float dist, float soft) {
     vec2  inCell  = fract(px / cell) - 0.5;
     float dotMask = 1.0 - smoothstep(0.18, 0.5, length(inCell));
     float front   = 1.0 - smoothstep(0.0, 0.42 * r, abs(dist - r * 0.82));
-    float density = mix(0.94, 0.80, front);                 // more near the front
+    float amount  = clamp(sparkleAmount, 0.0, 1.0);
+    float density = mix(mix(0.995, 0.86, amount), mix(0.97, 0.66, amount), front); // more near the front
     float sparkle = step(density, twinkle) * dotMask * body;
     // Sparkles dissolve faster than the glow fades.
-    sparkle *= (1.0 - smoothstep(0.35, 0.85, progress)) * (0.35 + 0.65 * front);
+    sparkle *= (1.0 - smoothstep(0.0, 0.55, progress)) * (0.35 + 0.65 * front) * step(0.001, amount);
 
     return glow + sparkle * 1.6;
 }

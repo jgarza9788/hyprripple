@@ -1,5 +1,9 @@
 # HyprRipple native Hyprland plugin
 
+# pipefail so `make test` fails when a test binary fails, not when tail does
+SHELL       := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
 CXX      ?= g++
 CXXFLAGS  = -fPIC -g -O2 -std=c++23 -Wall -Wno-deprecated-declarations
 LDFLAGS   = -shared
@@ -31,7 +35,17 @@ $(TARGET): $(OBJ)
 	@$(CXX) $(LDFLAGS) $(OBJ) -o $@ $(LIBS)
 	@echo "Built $@"
 
+# Pure-logic unit tests (no Hyprland needed), under ASan + UBSan, plus the
+# panel model tests.
+test: native/build/logic_test
+	@native/build/logic_test | grep -v '^PASS'
+	@node tests/model.test.js | grep -v '^PASS'
+
+native/build/logic_test: native/src/Logic.cpp native/src/Logic.hpp native/tests/logic_test.cpp
+	@mkdir -p native/build
+	@$(CXX) -std=c++23 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all native/src/Logic.cpp native/tests/logic_test.cpp -o $@
+
 clean:
 	rm -rf native/build $(TARGET)
 
-.PHONY: all clean
+.PHONY: all clean test
