@@ -69,7 +69,7 @@ var SCHEMA = [
       { value: "center", label: "Center" }
     ], fallback: "cursor" },
   { section: "Motion", key: "bounded", type: "bool", label: "Clip to window",
-    description: "Keep focus ripples inside the window, like Material's bounded ripple.", fallback: true },
+    description: "Keep click, tap and focus ripples inside their window, like Material's bounded ripple. Clicks on the desktop or bar stay unclipped.", fallback: true },
   { section: "Motion", key: "workspace_radius", type: "string", label: "Workspace radius",
     description: "'screen' floods the monitor; a number is a fixed radius in px.", fallback: "screen" },
   { section: "Motion", key: "max_ripples", type: "int", label: "Max ripples",

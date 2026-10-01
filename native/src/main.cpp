@@ -383,6 +383,24 @@ namespace {
         return w && w->m_isMapped && liveBox(w).containsPoint(p) ? w : nullptr;
     }
 
+    // Bound a ripple to its window (Material's bounded ripple) when "Clip to
+    // window" is on: it's clipped to the window's live, rounded box.
+    void clipTo(SRipple& r, const PHLWINDOW& w) {
+        if (!w || !g_state->settings.bounded)
+            return;
+        r.clip         = true;
+        r.clipBox      = liveBox(w);
+        r.clipRounding = w->rounding();
+    }
+
+    // Press-style triggers (mouse, touch, pen) share this: held ink that
+    // rides on - and is clipped to - the window under the point.
+    void spawnPress(const Vector2D& at, uint64_t holdKey) {
+        const auto w = focusedAt(at);
+        if (auto* r = spawn({.center = at, .radius = g_state->settings.radius, .anchor = w, .held = true, .holdKey = holdKey}))
+            clipTo(*r, w);
+    }
+
     void onMouseButton(const IPointer::SButtonEvent& ev) {
         const auto& s = g_state->settings;
         if (ev.state == WL_POINTER_BUTTON_STATE_RELEASED) {
@@ -394,7 +412,7 @@ namespace {
         g_state->lastClick = steady_clock::now();
         g_state->nClick++;
         const Vector2D cursor = g_pInputManager->getMouseCoordsInternal();
-        spawn({.center = cursor, .radius = s.radius, .anchor = focusedAt(cursor), .held = true, .holdKey = ev.button});
+        spawnPress(cursor, ev.button);
     }
 
     void onTouchDown(const ITouch::SDownEvent& ev) {
@@ -413,7 +431,7 @@ namespace {
         const Vector2D at = mon->m_position + ev.pos * mon->m_size;
         g_state->lastClick = steady_clock::now();
         g_state->nTouch++;
-        spawn({.center = at, .radius = g_state->settings.radius, .anchor = focusedAt(at), .held = true, .holdKey = HOLD_TOUCH | (uint32_t)ev.touchID});
+        spawnPress(at, HOLD_TOUCH | (uint32_t)ev.touchID);
     }
 
     void onTabletTip(const CTablet::STipEvent& ev) {
@@ -427,7 +445,7 @@ namespace {
         const Vector2D at = g_pInputManager->getMouseCoordsInternal();
         g_state->lastClick = steady_clock::now();
         g_state->nTouch++;
-        spawn({.center = at, .radius = g_state->settings.radius, .anchor = focusedAt(at), .held = true, .holdKey = HOLD_TABLET});
+        spawnPress(at, HOLD_TABLET);
     }
 
     void onWindowActive(PHLWINDOW window, Desktop::eFocusReason reason) {
@@ -444,8 +462,10 @@ namespace {
                 if (excluded(window)) {
                     g_pHyprRenderer->damageBox(last.lastBounds.value_or(last.bounds()));
                     g_state->ripples.pop_back();
-                } else
+                } else {
                     anchorTo(last, window);
+                    clipTo(last, window);
+                }
             }
         }
 
@@ -675,7 +695,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     c.focusHover       = addValue<CV::Bool>("plugin:hyprripple:focus_hover", "Also ripple on focus-follows-mouse", Config::BOOL{d.focusHover});
     c.onWorkspace      = addValue<CV::Bool>("plugin:hyprripple:on_workspace", "Ripple on workspace switch", Config::BOOL{d.onWorkspace});
     c.focusOrigin      = addValue<CV::String>("plugin:hyprripple:focus_origin", "cursor | center", Config::STRING{d.focusOrigin});
-    c.bounded          = addValue<CV::Bool>("plugin:hyprripple:bounded", "Clip focus ripples to the window", Config::BOOL{d.bounded});
+    c.bounded          = addValue<CV::Bool>("plugin:hyprripple:bounded", "Clip click and focus ripples to their window", Config::BOOL{d.bounded});
     c.maxRipples       = addValue<CV::Int>("plugin:hyprripple:max_ripples", "Max simultaneous ripples", Config::INTEGER{d.maxRipples});
     c.skipFullscreen   = addValue<CV::Bool>("plugin:hyprripple:skip_fullscreen", "No ripples over fullscreen windows", Config::BOOL{d.skipFullscreen});
     c.exclude          = addValue<CV::String>("plugin:hyprripple:exclude", "Comma-separated window class globs", Config::STRING{d.exclude});

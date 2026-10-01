@@ -87,7 +87,7 @@ file, and hand edits are picked up live by the service.
 | `sparkle_amount` | `0.5` | sparkle grain, 0 (plain glow) to 1 |
 | `duration` | `550` | ms |
 | `focus_origin` | `"cursor"` | `cursor` / `center` |
-| `bounded` | `true` | clip focus ripples to the window |
+| `bounded` | `true` | clip click, tap and focus ripples to their window |
 | `workspace_radius` | `"screen"` | `screen` or px |
 | `max_ripples` | `16` | oldest are dropped past this |
 | `skip_fullscreen` | `true` | no ripples on a monitor showing a fullscreen window |
