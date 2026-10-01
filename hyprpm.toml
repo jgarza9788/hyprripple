@@ -1,0 +1,9 @@
+[repository]
+name = "hyprripple"
+authors = ["jgarza"]
+description = "Material Design ink ripples in your theme's accent color"
+
+[hyprripple]
+description = "Material ink ripple on click, focus and workspace switch"
+output = "hyprripple.so"
+build = ["make"]
