@@ -17,6 +17,10 @@ Item {
 
   signal edited(var value)
   signal committed(var value)
+  signal reset()
+
+  // Differs from the schema default -> show the reset button and the pip.
+  readonly property bool modified: String(value) !== String(item.fallback)
 
   readonly property bool isBool: item.type === "bool"
   readonly property bool isEnum: item.type === "enum"
@@ -46,12 +50,27 @@ Item {
     width: Math.round(parent.width * 0.42)
     spacing: Style.spacing.xxs
 
-    Text {
-      text: root.item.label
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.subtitle
-      font.bold: true
+    Row {
+      spacing: Style.spacing.sm
+
+      Text {
+        text: root.item.label
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      // Filled pip = changed from the default.
+      Rectangle {
+        width: Style.space(5)
+        height: width
+        radius: width / 2
+        color: root.accent
+        opacity: root.modified ? 1 : 0
+        anchors.verticalCenter: parent.verticalCenter
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+      }
     }
 
     Text {
@@ -73,6 +92,25 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.spacing.lg
     layoutDirection: Qt.RightToLeft
+
+    // Reserved even when hidden so controls stay aligned down the list.
+    Item {
+      id: resetSlot
+      width: resetButton.width
+      height: resetButton.height
+      anchors.verticalCenter: parent.verticalCenter
+
+      PanelActionButton {
+        id: resetButton
+        iconText: "󰕌"
+        tooltipText: "Reset to default (" + String(root.item.fallback) + ")"
+        foreground: root.foreground
+        opacity: root.modified ? 1 : 0
+        enabled: root.modified
+        onClicked: root.reset()
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+      }
+    }
 
     ToggleSwitch {
       visible: root.isBool
@@ -96,7 +134,7 @@ Item {
 
     PanelSlider {
       visible: root.isSlider
-      width: Math.max(Style.space(90), control.width - Style.space(56) - Style.spacing.lg)
+      width: Math.max(Style.space(90), control.width - resetSlot.width - Style.space(56) - Style.spacing.lg * 2)
       minimum: root.isSlider ? root.item.min : 0
       maximum: root.isSlider ? root.item.max : 1
       step: root.item.step === undefined ? 1 : root.item.step

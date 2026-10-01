@@ -66,14 +66,21 @@ Item {
 
   // ----------------------------------------------------------------- values
 
-  function setValue(key, raw, commit) {
+  // Reset one value to its default. A preset reset only restores `style`;
+  // opacity/duration/etc. keep their own reset buttons.
+  function resetValue(key) {
+    var item = Model.itemFor(key)
+    if (item) setValue(key, item.fallback, true, true)
+  }
+
+  function setValue(key, raw, commit, noPreset) {
     var c = Model.coerce(key, raw)
     if (!c.ok) { root.errorText = c.error; return }
     root.errorText = ""
 
     // A preset brings its own opacity/softness/duration; apply them as one
     // batch, then fire a ripple so the pick is visible straight away.
-    if (key === "style") {
+    if (key === "style" && !noPreset) {
       root.settings = Model.applyPreset(root.settings, c.value)
       applyAllProc.command = Model.batchCommand(root.settings)
       applyAllProc.running = true
@@ -366,6 +373,7 @@ Item {
             opacity: (modelData.key === "enabled" || root.settings.enabled) ? 1 : 0.45
             onEdited: function(v) { root.setValue(modelData.key, v, false) }
             onCommitted: function(v) { root.setValue(modelData.key, v, true) }
+            onReset: root.resetValue(modelData.key)
           }
         }
 
