@@ -12,6 +12,8 @@ ok() { if [[ $2 == 0 ]]; then echo "PASS $1"; else echo "FAIL $1"; failed=$((fai
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
+# keep everything the scripts write inside the temp home
+export XDG_CACHE_HOME="$HOME/.cache" XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.local/state"
 export HYPRRIPPLE_HYPR_DIR="$HOME/.config/hypr"
 export HYPRRIPPLE_MENU_FILE="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
 export HYPRRIPPLE_SKIP_SYSTEM=1
@@ -111,7 +113,14 @@ fresh "$LUA_STOCK" "$MENU_ENTRIES"; run_i; run_u; ok "uninstall exits 0" $?
 same "$H/hyprland.lua" "$LUA_STOCK"; ok "hyprland.lua restored exactly" $?
 jsonc_valid "$M" && ! grep -q hyprripple "$M"; ok "menu entries removed, still valid" $?
 same "$M" "$MENU_ENTRIES"; ok "menu restored exactly" $?
-[[ -f $H/hyprripple.lua ]]; ok "settings kept without --purge" $?
+[[ ! -f $H/hyprripple.lua ]]; ok "settings removed by default" $?
+! ls "$H"/hyprland.lua.bak.hyprripple.* "$M".bak.hyprripple.* >/dev/null 2>&1; ok "installer backups cleaned up" $?
+ls "$HOME"/.cache/hyprripple-uninstall-*/hyprland.lua >/dev/null 2>&1; ok "uninstall keeps one safety copy in ~/.cache" $?
+! ls "$HOME"/.cache/hyprripple-uninstall-*/*.bak.* >/dev/null 2>&1; ok "safety copy has no stray backups" $?
+
+fresh "$LUA_STOCK" "$MENU_ENTRIES"; run_i; run_u --keep-settings
+[[ -f $H/hyprripple.lua ]]; ok "--keep-settings keeps settings" $?
+! grep -q hyprripple "$H/hyprland.lua"; ok "--keep-settings still removes the require" $?
 
 fresh "$LUA_STOCK" "$MENU_EMPTY"; run_i; run_u
 jsonc_valid "$M"; ok "empty menu valid after round trip" $?
@@ -126,13 +135,31 @@ run_u
 ! grep -q hyprripple "$H/hyprland.lua"; ok "legacy unfenced require + comment removed" $?
 jsonc_valid "$M" && ! grep -q hyprripple "$M" && grep -q pinball "$M"; ok "legacy unfenced menu entries removed" $?
 
-fresh "$LUA_STOCK" "$MENU_EMPTY"; run_i; mkdir -p "$HOME/.config/omarchy/jgarza.hyprripple"; run_u --purge
-[[ ! -f $H/hyprripple.lua && ! -d $HOME/.config/omarchy/jgarza.hyprripple ]]; ok "--purge removes settings" $?
+fresh "$LUA_STOCK" "$MENU_EMPTY"; run_i; mkdir -p "$HOME/.config/omarchy/jgarza.hyprripple"; echo '{}' > "$HOME/.config/omarchy/jgarza.hyprripple/presets.json"; run_u
+[[ ! -f $H/hyprripple.lua && ! -d $HOME/.config/omarchy/jgarza.hyprripple ]]; ok "per-preset memory removed by default" $?
+"$ROOT/uninstall" | grep -q "completely gone"; ok "reports nothing left" $?
+fresh "$LUA_STOCK" "$MENU_EMPTY"; run_i; run_u --purge; ok "old --purge flag still accepted" $?
 
 fresh "$LUA_STOCK" "$MENU_ENTRIES"; run_i; b1=$(cat "$H/hyprland.lua"); run_u --dry-run
 [[ "$(cat "$H/hyprland.lua")" == "$b1" ]]; ok "uninstall --dry-run changes nothing" $?
 
 "$ROOT/install" --bogus >/dev/null 2>&1; [[ $? != 0 ]]; ok "unknown option rejected" $?
+
+# ── folder deletion safety (never deletes anything here; just asks) ──────────
+G="$TMP/git"; mkdir -p "$G"
+can() { "$ROOT/bin/setup.sh" _can-delete "$1" >/dev/null 2>&1; }
+gitq() { git -C "$1" -c user.name=t -c user.email=t@t "${@:2}" >/dev/null 2>&1; }
+git init -q --bare "$G/remote.git"
+git clone -q "$G/remote.git" "$G/pushed" 2>/dev/null; echo a > "$G/pushed/f"; gitq "$G/pushed" add f; gitq "$G/pushed" commit -m a; gitq "$G/pushed" push origin HEAD
+can "$G/pushed"; ok "clean + pushed checkout may be deleted" $?
+echo b >> "$G/pushed/f"; ! can "$G/pushed"; ok "uncommitted changes protect the folder" $?
+gitq "$G/pushed" checkout f; echo new > "$G/pushed/untracked"; ! can "$G/pushed"; ok "untracked files protect the folder" $?
+rm "$G/pushed/untracked"; echo c >> "$G/pushed/f"; gitq "$G/pushed" commit -am c; ! can "$G/pushed"; ok "unpushed commits protect the folder" $?
+gitq "$G/pushed" push origin HEAD; echo d >> "$G/pushed/f"; gitq "$G/pushed" stash; ! can "$G/pushed"; ok "stashes protect the folder" $?
+git init -q "$G/local"; echo a > "$G/local/f"; gitq "$G/local" add f; gitq "$G/local" commit -m a
+! can "$G/local"; ok "no remote (only copy) protects the folder" $?
+mkdir -p "$G/plain"; ! can "$G/plain"; ok "non-git folder is protected" $?
+! can "$ROOT"; ok "this dev checkout (unpushed) is protected" $?
 
 echo
 if (( failed )); then echo "$failed failed"; exit 1; fi

@@ -57,13 +57,30 @@ notification when it needs this.
 ### Uninstall
 
 ```sh
-./uninstall            # keeps your settings
-./uninstall --purge    # also deletes hyprripple.lua and per-preset memory
+./uninstall
 ```
 
-It removes exactly what `./install` added: the require line, the menu
-entries, the shell plugin and the hyprpm plugin. Your other config is left as
-it was.
+This removes HyprRipple **completely**, so there's nothing left to clean up:
+
+- the native plugin (unloaded immediately and removed from hyprpm)
+- the `require` line in `hyprland.lua` and the Omarchy menu entries
+- the Omarchy settings panel and background service
+- your settings (`hyprripple.lua`, per-preset memory) and the installer's
+  backup files
+- the plugin folder itself, but only when nothing in it would be lost
+  (everything is committed and pushed). Otherwise it's kept, you're told why,
+  and given the command to delete it.
+
+It shows the full list and asks before changing anything. It keeps one
+safety copy of the config files it edits in `~/.cache/hyprripple-uninstall-*`,
+then checks that no trace is left and tells you so.
+
+| Option | |
+|---|---|
+| `--dry-run` | show the plan, change nothing |
+| `--yes` | don't ask (for scripts) |
+| `--keep-settings` | keep your settings, e.g. to reinstall later |
+| `--keep-folder` | keep the plugin folder |
 
 ## Using it
 

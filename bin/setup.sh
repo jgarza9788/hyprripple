@@ -19,7 +19,9 @@ SKIP_SYSTEM="${HYPRRIPPLE_SKIP_SYSTEM:-0}"
 
 DRY_RUN=0
 NO_MENU=0
-PURGE=0
+ASSUME_YES=0
+KEEP_SETTINGS=0
+KEEP_FOLDER=0
 
 if [[ -t 1 ]]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'; else B= G= Y= R= N=; fi
 step() { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
@@ -281,9 +283,95 @@ do_install() {
 }
 
 # ── uninstall ────────────────────────────────────────────────────────────────
+
+# Can DIR be deleted without losing anything? Only a clean git checkout whose
+# HEAD is already on a remote (and with no stashes) is safe. Prints the reason
+# when it isn't.
+can_delete() {
+  local dir="$1"
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "it isn't a git checkout"; return 1; }
+  [[ -z $(git -C "$dir" status --porcelain 2>/dev/null) ]] || { echo "it has uncommitted changes"; return 1; }
+  [[ -z $(git -C "$dir" stash list 2>/dev/null) ]] || { echo "it has stashed changes"; return 1; }
+  [[ -n $(git -C "$dir" branch -r --contains HEAD 2>/dev/null) ]] || { echo "its commits aren't pushed to any remote (it may be your only copy)"; return 1; }
+  return 0
+}
+
+# Everything left behind, one line each (empty = nothing).
+leftovers() {
+  [[ -f $HYPR_DIR/hyprland.lua ]] && grep -qi hyprripple "$HYPR_DIR/hyprland.lua" && echo "hyprripple lines in $HYPR_DIR/hyprland.lua"
+  [[ -f $MENU_FILE ]] && grep -qi hyprripple "$MENU_FILE" && echo "hyprripple entries in $MENU_FILE"
+  if (( ! KEEP_SETTINGS )); then
+    [[ -e $HYPR_DIR/hyprripple.lua ]] && echo "$HYPR_DIR/hyprripple.lua"
+    [[ -e $STATE_DIR ]] && echo "$STATE_DIR"
+  fi
+  compgen -G "$HYPR_DIR/hyprland.lua.bak.hyprripple.*" >/dev/null && echo "installer backups of hyprland.lua"
+  compgen -G "$MENU_FILE.bak.hyprripple.*" >/dev/null && echo "installer backups of the menu"
+  if (( ! SKIP_SYSTEM )); then
+    hyprpm list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Plugin hyprripple" && echo "hyprpm still lists hyprripple"
+    hyprctl plugin list 2>/dev/null | grep -q "Plugin hyprripple" && echo "hyprripple is still loaded in Hyprland"
+  fi
+  return 0
+}
+
 do_uninstall() {
   have python3 || die "python3 is needed for the config edits"
-  local res
+  local res stamp backup_dir
+  stamp=$(date +%Y%m%d-%H%M%S)
+  backup_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hyprripple-uninstall-$stamp"
+
+  # The folder decision is made up front so it's part of the plan shown.
+  local delete_folder=0 keep_reason=""
+  if (( KEEP_FOLDER )); then
+    keep_reason="--keep-folder"
+  elif (( SKIP_SYSTEM )); then
+    keep_reason="test mode"
+  elif keep_reason=$(can_delete "$REPO_DIR"); then
+    delete_folder=1
+  fi
+
+  step "This removes HyprRipple completely:"
+  echo "    - the native plugin (unloaded now, removed from hyprpm)"
+  echo "    - its line in $HYPR_DIR/hyprland.lua and its Omarchy menu entries"
+  echo "    - the Omarchy settings panel / background service"
+  (( KEEP_SETTINGS )) || echo "    - your settings: $HYPR_DIR/hyprripple.lua and $STATE_DIR"
+  echo "    - backups the installer made (*.bak.hyprripple.*)"
+  if (( delete_folder )); then
+    echo "    - this folder: $REPO_DIR"
+  else
+    echo "    - (keeping $REPO_DIR: $keep_reason)"
+  fi
+  echo "    A copy of the config files it edits is saved to $backup_dir"
+
+  if (( ! DRY_RUN && ! ASSUME_YES && ! SKIP_SYSTEM )); then
+    if [[ -t 0 ]]; then
+      local answer
+      read -r -p "    Continue? [y/N] " answer
+      [[ $answer == [yY]* ]] || { echo "    Cancelled - nothing was changed."; exit 0; }
+    else
+      die "not a terminal; re-run with --yes to confirm"
+    fi
+  fi
+
+  if (( ! SKIP_SYSTEM )); then
+    step "Native plugin"
+    (( DRY_RUN )) || hyprctl plugin unload "$REPO_DIR/hyprripple.so" >/dev/null 2>&1 || true
+    if hyprpm list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Plugin hyprripple"; then
+      run hyprpm disable hyprripple
+      if (( DRY_RUN )); then skip "would run: hyprpm remove hyprripple"; else hyprpm remove hyprripple || warn "hyprpm remove failed; run it yourself: hyprpm remove hyprripple"; fi
+      run hyprpm reload -n
+      (( DRY_RUN )) || ok "removed from hyprpm and unloaded"
+    else
+      skip "not installed in hyprpm"
+    fi
+  fi
+
+  # Config edits back up to one cache folder instead of littering ~/.config.
+  backup() {
+    local f="$1"
+    [[ -f $f ]] || return 0
+    (( DRY_RUN )) && return 0
+    mkdir -p "$backup_dir" && cp -p -- "$f" "$backup_dir/$(basename "$f")"
+  }
 
   step "hyprland.lua"
   if [[ -f $HYPR_DIR/hyprland.lua ]]; then
@@ -299,54 +387,92 @@ do_uninstall() {
     skip "no $MENU_FILE"
   fi
 
-  if (( ! SKIP_SYSTEM )); then
-    step "Shell plugin"
-    if have omarchy-plugin-disable; then
-      if (( DRY_RUN )); then skip "would run: omarchy-plugin-disable $ID"; else omarchy-plugin-disable "$ID" >/dev/null 2>&1 && ok "disabled $ID" || skip "$ID wasn't enabled"; fi
-    fi
-    step "Native plugin"
-    (( DRY_RUN )) || hyprctl plugin unload "$REPO_DIR/hyprripple.so" >/dev/null 2>&1 || true
-    if hyprpm list 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Plugin hyprripple"; then
-      run hyprpm disable hyprripple
-      if (( DRY_RUN )); then skip "would run: hyprpm remove hyprripple"; else hyprpm remove hyprripple || warn "hyprpm remove failed; run it yourself: hyprpm remove hyprripple"; fi
-      run hyprpm reload -n
-    else
-      skip "not installed in hyprpm"
-    fi
+  if (( ! SKIP_SYSTEM )) && have omarchy-plugin-disable; then
+    step "Omarchy shell plugin"
+    if (( DRY_RUN )); then skip "would run: omarchy-plugin-disable $ID"; else omarchy-plugin-disable "$ID" >/dev/null 2>&1 && ok "disabled $ID" || skip "$ID wasn't enabled"; fi
   fi
 
-  step "Settings"
-  if (( PURGE )); then
-    for f in "$HYPR_DIR/hyprripple.lua" "$STATE_DIR"; do
-      [[ -e $f ]] || continue
-      run rm -rf -- "$f"
-      (( DRY_RUN )) || ok "removed $f"
-    done
-  else
-    skip "kept $HYPR_DIR/hyprripple.lua and $STATE_DIR (--purge removes them)"
+  step "Settings and leftovers"
+  local f
+  local -a doomed=()
+  if (( ! KEEP_SETTINGS )); then
+    doomed+=("$HYPR_DIR/hyprripple.lua" "$STATE_DIR")
   fi
-  (( SKIP_SYSTEM || DRY_RUN )) || { hyprctl reload >/dev/null 2>&1 || true; }
-  ok "HyprRipple uninstalled"
+  for f in "$HYPR_DIR"/hyprland.lua.bak.hyprripple.* "$MENU_FILE".bak.hyprripple.*; do
+    [[ -e $f ]] && doomed+=("$f")
+  done
+  local removed=0
+  for f in "${doomed[@]}"; do
+    [[ -e $f ]] || continue
+    run rm -rf -- "$f"
+    removed=1
+    (( DRY_RUN )) || ok "removed $f"
+  done
+  (( KEEP_SETTINGS )) && skip "kept your settings (--keep-settings)"
+  (( removed )) || skip "nothing to remove"
+
+  if (( ! SKIP_SYSTEM && ! DRY_RUN )); then
+    hyprctl reload >/dev/null 2>&1 || true
+  fi
+
+  step "Plugin folder"
+  if (( delete_folder )); then
+    if (( DRY_RUN )); then
+      skip "would delete $REPO_DIR"
+    else
+      cd / && rm -rf -- "$REPO_DIR" && ok "deleted $REPO_DIR"
+    fi
+  else
+    skip "kept $REPO_DIR ($keep_reason)"
+    (( SKIP_SYSTEM )) || echo "      delete it yourself when you're sure: rm -rf $REPO_DIR"
+  fi
+  if (( ! SKIP_SYSTEM && ! DRY_RUN )); then
+    omarchy-shell -q shell rescanPlugins 2>/dev/null || true
+  fi
+
+  (( DRY_RUN )) && return 0
+  step "Checking"
+  local left
+  left=$(leftovers)
+  if [[ -z $left ]]; then
+    ok "HyprRipple is completely gone. Nothing else to do."
+    if [[ -d $backup_dir ]]; then echo "      (just in case: the config files it edited were saved to $backup_dir)"; fi
+  else
+    warn "a few things are still there:"
+    while IFS= read -r line; do warn "  $line"; done <<<"$left"
+    return 1
+  fi
 }
 
 usage() {
-  cat <<EOF
+  cat <<USAGE
 Usage: ./install   [--dry-run] [--no-menu]
-       ./uninstall [--dry-run] [--purge]
+       ./uninstall [--dry-run] [--yes] [--keep-settings] [--keep-folder]
 
-  --dry-run   show what would change, change nothing
-  --no-menu   don't add Omarchy menu entries
-  --purge     also delete your settings (hyprripple.lua, per-preset memory)
-EOF
+  --dry-run         show what would change, change nothing
+  --no-menu         install: don't add Omarchy menu entries
+  --yes             uninstall: don't ask for confirmation
+  --keep-settings   uninstall: keep hyprripple.lua and per-preset memory
+  --keep-folder     uninstall: keep this plugin folder
+
+By default ./uninstall removes everything HyprRipple added, including your
+settings and this folder (the folder only if nothing in it is unpushed).
+USAGE
 }
 
 main() {
   local cmd="${1:-}"; shift || true
+  if [[ $cmd == _can-delete ]]; then # test hook
+    can_delete "$1"; exit $?
+  fi
   for a in "$@"; do
     case "$a" in
-      --dry-run) DRY_RUN=1 ;;
-      --no-menu) NO_MENU=1 ;;
-      --purge)   PURGE=1 ;;
+      --dry-run)       DRY_RUN=1 ;;
+      --no-menu)       NO_MENU=1 ;;
+      --yes|-y)        ASSUME_YES=1 ;;
+      --keep-settings) KEEP_SETTINGS=1 ;;
+      --keep-folder)   KEEP_FOLDER=1 ;;
+      --purge)         ;; # old flag: removing settings is now the default
       -h|--help) usage; exit 0 ;;
       *) usage; die "unknown option: $a" ;;
     esac

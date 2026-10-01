@@ -1,3 +1,3 @@
 #!/bin/bash
-# Uninstall HyprRipple (keeps your settings unless --purge). See ./uninstall --help
+# Completely remove HyprRipple (asks first). See ./uninstall --help
 exec "$(dirname "${BASH_SOURCE[0]}")/bin/setup.sh" uninstall "$@"
