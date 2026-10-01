@@ -139,6 +139,21 @@ ok("memory drops unknown presets", Object.keys(mem).join() === "sparkle");
 ok("memory junk -> empty", JSON.stringify(M.parseMemory("not json")) === "{}" && JSON.stringify(M.parseMemory("[1]")) === "{}");
 ok("memory round trip", JSON.stringify(M.parseMemory(M.renderMemory({ ring: { opacity: 0.4 } }))) === '{"ring":{"opacity":0.4}}');
 
+// style events (service path)
+ok("style event parses", JSON.stringify(M.parseStyleEvent("classic,ring")) === '{"from":"classic","to":"ring"}');
+for (const bad of ["", "classic", "classic,nope", "x,ring", "ring,ring", "a,b,c", "classic,ring;exit"])
+  ok("style event rejects " + JSON.stringify(bad), M.parseStyleEvent(bad) === null);
+{
+  // plugin just switched to ring but still holds classic's tweaked values
+  const live = Object.assign(M.defaults(), { style: "ring", opacity: 0.13, radius: 200, softness: 4, resolved_color: "#ff0000", active: 2 });
+  let r = M.switchFromLive(live, "classic", "ring", { ring: { opacity: 0.66 } });
+  ok("live values remembered for old preset", r.memory.classic.opacity === 0.13 && r.memory.classic.radius === 200);
+  ok("target memory applied", r.settings.style === "ring" && r.settings.opacity === 0.66 && r.settings.radius === 140);
+  ok("extra status keys dropped", r.settings.resolved_color === undefined && r.settings.active === undefined);
+  r = M.switchFromLive(Object.assign({}, r.settings, { style: "classic" }), "ring", "classic", r.memory);
+  ok("round trip via service", r.settings.opacity === 0.13 && r.settings.radius === 200 && r.memory.ring.opacity === 0.66);
+}
+
 // hyprctl
 ok("set command bool", M.setCommand("bounded", false).join(" ") === "hyprctl hyprripple set bounded false");
 const batch = M.batchCommand(M.defaults());

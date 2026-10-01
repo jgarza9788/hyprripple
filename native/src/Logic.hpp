@@ -97,6 +97,24 @@ namespace Logic {
     // `list` is the comma-separated `exclude` setting.
     bool classExcluded(std::string_view list, std::string_view cls);
 
+    // ── rate limiting ────────────────────────────────────────────────────────
+
+    // Token bucket for caller-driven triggers (hyprctl / Lua): `burst` at
+    // once, refilling at `perSecond`. Stops a looping script from stacking
+    // dozens of full-screen ripples and stalling the compositor.
+    struct RateLimiter {
+        float perSecond = 20.f;
+        float burst     = 10.f;
+        float tokens    = 10.f;
+        float last      = -1.f; // seconds, caller's clock
+
+        bool  allow(float now);
+    };
+
+    // Largest radius a caller may ask for (logical px); workspace floods are
+    // sized by the plugin itself and may go larger.
+    inline constexpr float MAX_MANUAL_RADIUS = 4000.f;
+
     // ── colors / output ──────────────────────────────────────────────────────
 
     // rgba in 0..1, or nullopt if `value` isn't a literal color.

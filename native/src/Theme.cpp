@@ -1,12 +1,14 @@
 #include "Theme.hpp"
 #include "Logic.hpp"
 
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <fstream>
+#include <sstream>
 #include <unordered_map>
 
 namespace {
@@ -45,13 +47,30 @@ namespace {
         s_inode      = st.st_ino;
         s_mtime      = st.st_mtim;
 
-        // A theme's colors.toml is a few hundred bytes; refuse anything that
-        // isn't a modest regular file rather than read it on every ripple.
-        if (!S_ISREG(st.st_mode) || st.st_size > MAX_COLORS_FILE)
+        // Check the file we actually opened (fstat on the fd), not the path,
+        // so it can't be swapped between the check and the read. A theme's
+        // colors.toml is a few hundred bytes: refuse anything that isn't a
+        // modest regular file, and never block on a FIFO.
+        const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOCTTY);
+        if (fd < 0)
             return;
+        struct stat fst{};
+        std::string content;
+        if (fstat(fd, &fst) == 0 && S_ISREG(fst.st_mode) && fst.st_size <= MAX_COLORS_FILE) {
+            content.resize((size_t)fst.st_size);
+            size_t got = 0;
+            while (got < content.size()) {
+                const ssize_t n = read(fd, content.data() + got, content.size() - got);
+                if (n <= 0)
+                    break;
+                got += (size_t)n;
+            }
+            content.resize(got);
+        }
+        close(fd);
 
-        std::ifstream file(path);
-        std::string   line;
+        std::istringstream file(content);
+        std::string        line;
         int           lines = 0;
         while (std::getline(file, line) && ++lines <= 512) {
             if (auto hash = line.find('#'); hash != std::string::npos) {

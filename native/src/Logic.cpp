@@ -299,6 +299,19 @@ namespace Logic {
         return false;
     }
 
+    // ── rate limiting ────────────────────────────────────────────────────────
+
+    bool RateLimiter::allow(float now) {
+        if (last < 0.f || now < last) // first call, or the clock went backwards
+            last = now;
+        tokens = std::min(burst, tokens + (now - last) * perSecond);
+        last   = now;
+        if (tokens < 1.f)
+            return false;
+        tokens -= 1.f;
+        return true;
+    }
+
     // ── colors / output ──────────────────────────────────────────────────────
 
     static std::optional<uint32_t> parseHex(std::string_view hex) {

@@ -136,6 +136,25 @@ int main() {
         ok("empty class never excluded", !classExcluded("*", ""));
     }
 
+    // ── rate limiter ─────────────────────────────────────────────────────────
+    {
+        RateLimiter rl;
+        int         allowed = 0;
+        for (int i = 0; i < 100; ++i)
+            allowed += rl.allow(0.f);
+        ok("burst caps instant spam", allowed == 10);
+        ok("empty bucket refuses", !rl.allow(0.01f));
+        ok("refills over time", rl.allow(0.2f) && rl.allow(0.2f));
+        RateLimiter steady;
+        int         n = 0;
+        for (int i = 0; i < 1000; ++i)
+            n += steady.allow(i * 0.001f); // 1000 calls over 1 s
+        ok("sustained rate ~ burst + perSecond", n >= 28 && n <= 31);
+        RateLimiter back;
+        back.allow(5.f);
+        ok("clock going backwards is safe", back.allow(1.f));
+    }
+
     // ── colors / json ────────────────────────────────────────────────────────
     {
         auto c = parseColorLiteral("#ff8000");

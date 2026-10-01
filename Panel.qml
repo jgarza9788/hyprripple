@@ -19,12 +19,9 @@ Item {
   property var manifest: null
 
   readonly property string luaPath: Quickshell.env("HOME") + "/.config/hypr/hyprripple.lua"
-  // Per-preset opacity/radius/softness. Panel-only state, so it lives next to
-  // the other jgarza.* plugin state rather than in hyprripple.lua (which
-  // Hyprland parses and would reject unknown keys in).
-  readonly property string stateDir: Quickshell.env("HOME") + "/.config/omarchy/jgarza.hyprripple"
-  readonly property string memoryPath: stateDir + "/presets.json"
-  property var presetMemory: ({})
+  // Per-preset opacity/radius/softness memory, owned by Service.qml; the
+  // panel only clears it on "reset everything".
+  readonly property string memoryPath: Quickshell.env("HOME") + "/.config/omarchy/jgarza.hyprripple/presets.json"
 
   property bool opened: false
   property var settings: Model.defaults()
@@ -52,7 +49,6 @@ Item {
     root.opened = true
     root.errorText = ""
     luaFile.reload()
-    memoryFile.reload()
     statusProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -90,13 +86,15 @@ Item {
 
     // A preset brings its own opacity/softness/duration; apply them as one
     // batch, then fire a ripple so the pick is visible straight away.
+    // A preset switch is just `set style`: the plugin announces it and the
+    // service swaps in the preset's remembered values and rewrites
+    // hyprripple.lua, which this panel then reloads. One writer, no race.
+    // Pending tweaks are flushed first so they're what gets remembered.
     if (key === "style" && !noPreset) {
-      var switched = Model.switchPreset(root.settings, root.presetMemory, c.value)
-      root.settings = switched.settings
-      root.presetMemory = switched.memory
-      applyAllProc.command = Model.batchCommand(root.settings)
-      applyAllProc.running = true
-      persistTimer.restart()
+      if (persistTimer.running) persistNow()
+      setProc.command = Model.setCommand("style", c.value)
+      if (!setProc.running) setProc.running = true
+      else root.pending = Object.assign({}, root.pending, { style: c.value })
       previewTimer.restart()
       return
     }
@@ -107,11 +105,7 @@ Item {
     root.settings = next
 
     push(key, c.value)
-    if (commit) {
-      // Remember the tweak under the current preset.
-      if (Model.isPresetKey(key)) root.presetMemory = Model.rememberPreset(root.presetMemory, next)
-      persistTimer.restart()
-    }
+    if (commit) persistTimer.restart()
   }
 
   // One set in flight, newest value queued behind it, so a slider drag
@@ -142,8 +136,6 @@ Item {
 
   function persistNow() {
     persistTimer.stop()
-    var mem = Model.renderMemory(root.presetMemory)
-    if (mem !== memoryFile.text()) memoryFile.setText(mem)
     var next = Model.renderLua(root.settings)
     if (next === luaFile.text()) return
     root.selfWrite = true
@@ -153,7 +145,7 @@ Item {
 
   function resetAll() {
     root.settings = Model.defaults()
-    root.presetMemory = ({})
+    memoryFile.setText(Model.renderMemory({}))
     applyAllProc.command = Model.batchCommand(root.settings)
     applyAllProc.running = true
     persistNow()
@@ -251,19 +243,11 @@ Item {
     onTriggered: root.statusText = ""
   }
 
-  // The state dir has to exist before the first save.
-  Process {
-    running: true
-    command: ["mkdir", "-p", root.stateDir]
-  }
-
   FileView {
     id: memoryFile
     path: root.memoryPath
     atomicWrites: true
     printErrors: false
-    onLoaded: root.presetMemory = Model.parseMemory(text())
-    onLoadFailed: root.presetMemory = ({})
     onSaveFailed: root.errorText = "Could not write " + root.memoryPath
   }
 

@@ -40,6 +40,7 @@ struct SRipple {
     bool                                  clip          = false;
     CBox                                  clipBox;              // global logical
     float                                 clipRounding = 0.f;
+    bool                                  above        = false; // drawn above bars/launchers (pressed on one)
 
     // Press-and-hold: a held ripple keeps its ink until the matching release.
     bool                                                 held    = false;

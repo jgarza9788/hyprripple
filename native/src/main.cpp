@@ -27,6 +27,10 @@
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/desktop/state/ViewState.hpp>
+#include <hyprland/src/desktop/state/ViewHitTester.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
 #include <hyprutils/signal/Listener.hpp>
 
 extern "C" {
@@ -40,6 +44,7 @@ extern "C" {
 #include <format>
 #include <random>
 #include <sstream>
+#include <unordered_map>
 
 using namespace std::chrono;
 namespace CV = Config::Values;
@@ -83,7 +88,13 @@ namespace {
         SP<CEventLoopTimer>                                 sweep;
         SP<SHyprCtlCommand>                                 ctl;
         steady_clock::time_point                            lastClick{}, lastWorkspace{};
-        int                                                 sharing = 0; // active screenshares
+        // Active screenshares by name, from screenshare start/stop events.
+        // (Hyprland's own screenshare manager isn't safely reachable from a
+        // plugin: its singleton isn't exported.) `hyprctl hyprripple sharing
+        // reset` clears it if a stop was ever missed.
+        std::unordered_map<std::string, int>                shares;
+        Logic::RateLimiter                                  manualLimit;
+        UP<SEventLoopDoLaterLock>                           pendingTablet;
         std::minstd_rand                                    rng{std::random_device{}()};
         // counters for `hyprctl hyprripple stats`
         uint64_t nClick = 0, nTouch = 0, nFocus = 0, nWorkspace = 0, nManual = 0, nSkipped = 0, nFrames = 0, nPre = 0;
@@ -91,6 +102,10 @@ namespace {
     };
 
     std::unique_ptr<SState> g_state;
+
+    bool sharing() {
+        return !g_state->shares.empty();
+    }
 
     // Safety net only: frames normally come from render.pre. This sweep
     // clears finished ripples if a monitor stops rendering (DPMS, lock).
@@ -172,7 +187,7 @@ namespace {
             R"({{"enabled":{},"color":"{}","resolved_color":"#{:02x}{:02x}{:02x}","opacity":{},"duration":{},"radius":{},"workspace_radius":"{}","softness":{},"style":"{}","ring_width":{},"sparkle_amount":{},"on_click":"{}","on_touch":{},"hold":{},"on_focus":{},"focus_hover":{},"on_workspace":{},"focus_origin":"{}","bounded":{},"max_ripples":{},"skip_fullscreen":{},"exclude":"{}","pause_when_sharing":{},"sharing":{},"active":{}}})",
             s.enabled, e(s.color), (int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255), s.opacity, s.duration, s.radius,
             e(s.workspaceRadius), s.softness, e(s.style), s.ringWidth, s.sparkleAmount, e(s.onClick), s.onTouch, s.hold, s.onFocus, s.focusHover, s.onWorkspace,
-            e(s.focusOrigin), s.bounded, s.maxRipples, s.skipFullscreen, e(s.exclude), s.pauseWhenSharing, g_state->sharing > 0, g_state->ripples.size());
+            e(s.focusOrigin), s.bounded, s.maxRipples, s.skipFullscreen, e(s.exclude), s.pauseWhenSharing, sharing(), g_state->ripples.size());
     }
 
     // ── spawning ─────────────────────────────────────────────────────────────
@@ -224,7 +239,7 @@ namespace {
         const auto& s = g_state->settings;
         if (!s.enabled)
             return false;
-        if (s.pauseWhenSharing && g_state->sharing > 0)
+        if (s.pauseWhenSharing && sharing())
             return false;
         if (excluded(window))
             return false;
@@ -344,8 +359,11 @@ namespace {
             self->updateTimeout(SWEEP);
     }
 
+    // Window ripples go in right after windows (under bars and launchers);
+    // ripples on a bar / launcher go in at the last moment, above layers.
     void onRenderStage(eRenderStage stage) {
-        if ((stage != RENDER_POST_WINDOWS && stage != RENDER_POST) || !g_state || g_state->ripples.empty() || g_pHyprRenderer->m_bRenderingSnapshot)
+        if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty() ||
+            g_pHyprRenderer->m_bRenderingSnapshot)
             return;
         const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
         if (!mon)
@@ -354,12 +372,13 @@ namespace {
             onPostRender(mon);
             return;
         }
+        const bool above = stage == RENDER_LAST_MOMENT;
 
         const CBox monBox{mon->m_position, mon->m_size};
         const auto now = steady_clock::now();
         bool       drew = false;
         for (auto& r : g_state->ripples) {
-            if (!r.bounds().overlaps(monBox))
+            if (r.above != above || !r.bounds().overlaps(monBox))
                 continue;
             drew            = true;
             const auto life = r.life(now);
@@ -377,10 +396,26 @@ namespace {
 
     // ── triggers ─────────────────────────────────────────────────────────────
 
-    // The focused window, if the point is on it: clicks ride along with it.
-    PHLWINDOW focusedAt(const Vector2D& p) {
-        const auto w = Desktop::focusState()->window();
-        return w && w->m_isMapped && liveBox(w).containsPoint(p) ? w : nullptr;
+    // The window actually under the point - Hyprland's own hit test, so
+    // overlapping floating windows resolve to the top one, focused or not.
+    PHLWINDOW windowAtPoint(const Vector2D& p) {
+        const auto w = Desktop::viewState()->hitTest().windowAt(
+            p, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+        return w && w->m_isMapped && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
+    }
+
+    // A bar, launcher or other top/overlay layer surface under the point.
+    PHLLS layerAt(const Vector2D& p) {
+        const auto mon = monitorAt(p);
+        if (!mon)
+            return nullptr;
+        for (int layer = 3; layer >= 2; --layer) // overlay, then top
+            for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
+                const auto ls = ref.lock();
+                if (ls && ls->m_mapped && ls->m_geometry.containsPoint(p))
+                    return ls;
+            }
+        return nullptr;
     }
 
     // Bound a ripple to its window (Material's bounded ripple) when "Clip to
@@ -394,9 +429,21 @@ namespace {
     }
 
     // Press-style triggers (mouse, touch, pen) share this: held ink that
-    // rides on - and is clipped to - the window under the point.
+    // rides on - and is clipped to - the window under the point. On a bar or
+    // launcher it's drawn above layers and clipped to that surface instead.
     void spawnPress(const Vector2D& at, uint64_t holdKey) {
-        const auto w = focusedAt(at);
+        if (const auto ls = layerAt(at)) {
+            if (auto* r = spawn({.center = at, .radius = g_state->settings.radius, .held = true, .holdKey = holdKey})) {
+                r->above = true;
+                if (g_state->settings.bounded) {
+                    r->clip    = true;
+                    r->clipBox = ls->m_geometry;
+                }
+                damage(*r);
+            }
+            return;
+        }
+        const auto w = windowAtPoint(at);
         if (auto* r = spawn({.center = at, .radius = g_state->settings.radius, .anchor = w, .held = true, .holdKey = holdKey}))
             clipTo(*r, w);
     }
@@ -441,11 +488,14 @@ namespace {
         }
         if (!g_state->settings.onTouch)
             return;
-        // A tablet drives the cursor, so the cursor is where the pen landed.
-        const Vector2D at = g_pInputManager->getMouseCoordsInternal();
-        g_state->lastClick = steady_clock::now();
+        // A tablet drives the cursor, but this listener runs before Hyprland
+        // handles the tip, so read the cursor once the event loop has moved it.
+        g_state->lastClick     = steady_clock::now();
         g_state->nTouch++;
-        spawnPress(at, HOLD_TABLET);
+        g_state->pendingTablet = g_pEventLoopManager->doLaterLock([] {
+            if (g_state)
+                spawnPress(g_pInputManager->getMouseCoordsInternal(), HOLD_TABLET);
+        });
     }
 
     void onWindowActive(PHLWINDOW window, Desktop::eFocusReason reason) {
@@ -534,12 +584,31 @@ namespace {
 
     // ── manual trigger (hyprctl / Lua) ───────────────────────────────────────
 
-    void manualTrigger(std::optional<Vector2D> at, std::optional<float> radius) {
+    // Returns false when rate limited.
+    bool manualTrigger(std::optional<Vector2D> at, std::optional<float> radius, bool above = false) {
+        const float now = std::chrono::duration<float>(steady_clock::now().time_since_epoch()).count();
+        if (!g_state->manualLimit.allow(now))
+            return false;
         g_state->nManual++;
+        if (radius)
+            radius = std::clamp(*radius, 4.f, Logic::MAX_MANUAL_RADIUS);
         // Caller-supplied numbers: keep them in a sane layout range.
         if (at)
             at = Vector2D{std::clamp(at->x, -1e5, 1e5), std::clamp(at->y, -1e5, 1e5)};
-        spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .force = true});
+        if (auto* r = spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .force = true}); r && above)
+            r->above = true;
+        return true;
+    }
+
+    // Apply one setting from hyprctl / Lua. A style change is announced on
+    // Hyprland's event socket (hyprripplestyle>>old,new) so the Omarchy
+    // service can swap in that preset's remembered values, whoever made it.
+    std::string setFromCaller(const std::string& key, const std::string& value) {
+        const std::string before = g_state->settings.style;
+        auto              err    = Logic::applySetting(g_state->settings, key, value);
+        if (err.empty() && key == "style" && g_state->settings.style != before && g_pEventManager)
+            g_pEventManager->postEvent(SHyprIPCEvent{"hyprripplestyle", before + "," + g_state->settings.style});
+        return err;
     }
 
     std::string onHyprctl(eHyprCtlOutputFormat, std::string request) {
@@ -569,11 +638,21 @@ namespace {
             std::string value = args[2];
             for (size_t i = 3; i < args.size(); ++i)
                 value += " " + args[i];
-            const auto err = Logic::applySetting(g_state->settings, args[1], value);
+            const auto err = setFromCaller(args[1], value);
             return err.empty() ? "ok" : "error: " + err;
         }
 
+        if (cmd == "sharing") {
+            if (args.size() >= 2 && args[1] == "reset")
+                g_state->shares.clear();
+            return std::format(R"({{"sharing":{},"shares":{}}})", sharing(), g_state->shares.size());
+        }
+
         if (cmd == "trigger") {
+            // optional trailing "above": draw over bars / launchers
+            const bool above = args.size() >= 2 && args.back() == "above";
+            if (above)
+                args.pop_back();
             std::optional<Vector2D> at;
             std::optional<float>    radius;
             if (args.size() >= 3) {
@@ -587,8 +666,7 @@ namespace {
                 if (!radius)
                     return "usage: hyprctl hyprripple trigger [x y [radius]]";
             }
-            manualTrigger(at, radius);
-            return "ok";
+            return manualTrigger(at, radius, above) ? "ok" : "error: rate limited";
         }
 
         if (cmd == "stats") {
@@ -602,7 +680,7 @@ namespace {
             return std::format(
                 R"({{"click":{},"touch":{},"focus":{},"last_focus_reason":{},"workspace":{},"manual":{},"skipped":{},"frames":{},"pre":{},"sharing":{},"active":{},"ripples":[{}]}})",
                 g_state->nClick, g_state->nTouch, g_state->nFocus, g_state->lastFocusReason, g_state->nWorkspace, g_state->nManual, g_state->nSkipped, g_state->nFrames, g_state->nPre,
-                g_state->sharing, g_state->ripples.size(), list);
+                g_state->shares.size(), g_state->ripples.size(), list);
         }
 
         if (cmd == "reload-config") {
@@ -610,7 +688,7 @@ namespace {
             return "ok";
         }
 
-        return "usage: hyprctl hyprripple [get | set <key> <value> | trigger [x y [radius]] | stats | reload-config]";
+        return "usage: hyprctl hyprripple [get | set <key> <value> | trigger [x y [radius]] [above] | stats | sharing [reset] | reload-config]";
     }
 
     // hl.plugin.hyprripple.trigger([x, y [, radius]])
@@ -630,7 +708,8 @@ namespace {
             if (std::isfinite(r))
                 radius = (float)r;
         }
-        manualTrigger(at, radius);
+        if (!manualTrigger(at, radius))
+            return luaL_error(L, "hyprripple.trigger: rate limited");
         return 0;
     }
 
@@ -644,7 +723,7 @@ namespace {
             value = lua_toboolean(L, 2) ? "true" : "false";
         else
             value = luaL_checkstring(L, 2);
-        if (auto err = Logic::applySetting(g_state->settings, key, value); !err.empty())
+        if (auto err = setFromCaller(key, value); !err.empty())
             return luaL_error(L, "hyprripple.set: %s", err.c_str());
         return 0;
     }
@@ -739,9 +818,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (g_state)
             onWorkspaceActive(ws);
     }));
-    g_state->listeners.push_back(ev.screenshare.state.listen([](bool start, uint8_t, const std::string&) {
-        if (g_state)
-            g_state->sharing = std::max(0, g_state->sharing + (start ? 1 : -1));
+    g_state->listeners.push_back(ev.screenshare.state.listen([](bool start, uint8_t, const std::string& name) {
+            if (!g_state)
+                return;
+            auto& n = g_state->shares[name];
+            n += start ? 1 : -1;
+            if (n <= 0)
+                g_state->shares.erase(name);
     }));
     g_state->listeners.push_back(ev.render.pre.listen([](PHLMONITOR mon) { onPreRender(mon); }));
     g_state->listeners.push_back(ev.render.stage.listen([](eRenderStage stage) { onRenderStage(stage); }));
@@ -765,6 +848,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         return;
 
     g_state->listeners.clear();
+    g_state->pendingTablet.reset();
 
     if (g_state->sweep) {
         g_state->sweep->cancel();

@@ -165,6 +165,24 @@ function cleanMemory(memory) {
   return out
 }
 
+// `hyprripplestyle>>old,new` from Hyprland's event socket -> { from, to },
+// or null if it isn't two known presets.
+function parseStyleEvent(data) {
+  var parts = String(data || "").split(",")
+  if (parts.length !== 2 || !PRESETS[parts[0]] || !PRESETS[parts[1]] || parts[0] === parts[1]) return null
+  return { from: parts[0], to: parts[1] }
+}
+
+// The service's half of a style change made anywhere (panel, hyprctl, Lua):
+// the plugin already switched `style` but still holds the old preset's
+// opacity/radius/softness, so `live` (its `hyprctl hyprripple get`) is
+// exactly what to remember for `from`.
+function switchFromLive(live, from, to, memory) {
+  var settings = normalize(live)
+  settings.style = from
+  return switchPreset(settings, memory, to)
+}
+
 function parseMemory(text) {
   try { return cleanMemory(JSON.parse(String(text || ""))) } catch (e) { return {} }
 }
@@ -401,6 +419,8 @@ if (typeof module !== "undefined") {
     switchPreset: switchPreset,
     cleanMemory: cleanMemory,
     parseMemory: parseMemory,
+    parseStyleEvent: parseStyleEvent,
+    switchFromLive: switchFromLive,
     renderMemory: renderMemory,
     itemFor: itemFor,
     defaults: defaults,
