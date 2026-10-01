@@ -32,12 +32,13 @@ var SCHEMA = [
       { value: "foreground", label: "Foreground" },
       { value: "selection_background", label: "Selection" }
     ], fallback: "accent" },
-  { section: "Look", key: "style", type: "enum", label: "Style",
-    description: "A filled ink disc, or an expanding ring.",
+  { section: "Look", key: "style", type: "enum", label: "Preset",
+    description: "Classic Material ink, an expanding ring, or Material 3's soft glow with shimmering sparkles. Picking one also sets its opacity, softness and duration.",
     options: [
-      { value: "fill", label: "Ink" },
-      { value: "ring", label: "Ring" }
-    ], fallback: "fill" },
+      { value: "classic", label: "Classic" },
+      { value: "ring", label: "Ring" },
+      { value: "sparkle", label: "Sparkle" }
+    ], fallback: "classic" },
   { section: "Look", key: "opacity", type: "float", label: "Opacity",
     description: "Peak opacity of the ink. Material uses about 0.12 to 0.3.",
     min: 0.05, max: 1, step: 0.01, decimals: 2, fallback: 0.28 },
@@ -73,6 +74,24 @@ var SCHEMA = [
 ]
 
 var SECTIONS = ["Triggers", "Look", "Motion"]
+
+// What picking a preset sets alongside `style`. Everything stays tweakable.
+var PRESETS = {
+  classic: { opacity: 0.28, softness: 2, duration: 550 },
+  ring:    { opacity: 0.5, softness: 1.5, ring_width: 6, duration: 600 },
+  sparkle: { opacity: 0.2, softness: 2, duration: 800 }
+}
+
+// settings with `style` and its preset values applied
+function applyPreset(settings, style) {
+  var out = {}
+  for (var k in settings) out[k] = settings[k]
+  var preset = PRESETS[style]
+  if (!preset) return out
+  out.style = style
+  for (var key in preset) out[key] = preset[key]
+  return out
+}
 
 function itemFor(key) {
   for (var i = 0; i < SCHEMA.length; i++)
@@ -123,6 +142,7 @@ function coerce(key, raw) {
   }
 
   if (item.type === "enum") {
+    if (key === "style" && raw === "fill") raw = "classic" // pre-preset name
     for (var i = 0; i < item.options.length; i++)
       if (item.options[i].value === raw) return { ok: true, value: raw }
     return { ok: false, error: key + " must be one of " + item.options.map(function(o) { return o.value }).join(", ") }
@@ -244,6 +264,8 @@ if (typeof module !== "undefined") {
   module.exports = {
     SCHEMA: SCHEMA,
     SECTIONS: SECTIONS,
+    PRESETS: PRESETS,
+    applyPreset: applyPreset,
     itemFor: itemFor,
     defaults: defaults,
     rowsFor: rowsFor,

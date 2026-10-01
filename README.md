@@ -9,6 +9,15 @@ accent color.
   Hover focus (`follow_mouse`) is opt-in.
 - **Workspace switch**: a wave floods the whole monitor from the cursor.
 
+Three presets (`style`). Picking one in the panel also sets its opacity,
+softness and duration:
+
+- **classic**: Material 2 ink, a near-solid disc with a feathered rim.
+- **ring**: an expanding ring.
+- **sparkle**: Material 3 / Android 12. A soft radial glow with a turbulent
+  edge and shimmering noise sparkles that trail the wave and dissolve as it
+  fades. It uses M3's `cubic-bezier(0.2, 0, 0, 1)` easing.
+
 There are two halves:
 
 | Part | What it is |
@@ -30,7 +39,9 @@ is already wired up:
 - `~/.config/hypr/hyprripple.lua`
 - `require("hypr.hyprripple")` in `~/.config/hypr/hyprland.lua`
 
-Open the settings with:
+Open the settings from the Omarchy menu: search "ripple", or go to Style →
+HyprRipple. These entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc`.
+From a terminal:
 
 ```sh
 omarchy-shell shell toggle jgarza.hyprripple
@@ -54,7 +65,7 @@ file, and hand edits are picked up live by the service.
 | `focus_hover` | `false` | also on focus-follows-mouse |
 | `on_workspace` | `true` | ripple on workspace switch |
 | `color` | `"accent"` | any `colors.toml` key (`accent`, `foreground`, `color4`...) or `#rrggbb[aa]` |
-| `style` | `"fill"` | `fill` (ink disc) / `ring` |
+| `style` | `"classic"` | `classic` / `ring` / `sparkle` (`fill` still means classic) |
 | `opacity` | `0.28` | peak ink opacity |
 | `radius` | `140` | click ripple radius, logical px |
 | `softness` | `2` | edge feather, px |

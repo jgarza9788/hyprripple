@@ -36,7 +36,7 @@ ok("unknown key rejected", !M.coerce("nope", 1).ok);
 
 // render -> parse round trip
 const custom = Object.assign(M.defaults(), {
-  on_click: "any", on_focus: false, color: "#12abef", opacity: 0.4, style: "ring", workspace_radius: "1200",
+  on_click: "any", on_focus: false, color: "#12abef", opacity: 0.4, style: "sparkle", workspace_radius: "1200",
 });
 const lua = M.renderLua(custom);
 ok("lua guarded by plugin check", lua.includes("if hl.plugin.hyprripple then"));
@@ -63,6 +63,16 @@ ok("out of range clamped", p.radius === 600);
 ok("invalid enum falls back", p.on_click === "left");
 ok("unknown key ignored", p.bogus === undefined);
 ok("empty file -> defaults", JSON.stringify(M.parseLua("")) === JSON.stringify(M.defaults()));
+
+// presets
+ok("old fill name maps to classic", M.coerce("style", "fill").value === "classic");
+ok("sparkle accepted", M.coerce("style", "sparkle").value === "sparkle");
+const sp = M.applyPreset(M.defaults(), "sparkle");
+ok("preset sets style", sp.style === "sparkle");
+ok("preset sets its values", sp.opacity === M.PRESETS.sparkle.opacity && sp.duration === M.PRESETS.sparkle.duration);
+ok("preset keeps triggers", sp.on_click === "left");
+ok("preset values are valid", Object.keys(M.PRESETS).every((n) => Object.keys(M.PRESETS[n]).every((k) => M.coerce(k, M.PRESETS[n][k]).value === M.PRESETS[n][k])));
+ok("unknown preset is a no-op", M.applyPreset(M.defaults(), "nope").style === "classic");
 
 // hyprctl
 ok("set command bool", M.setCommand("bounded", false).join(" ") === "hyprctl hyprripple set bounded false");

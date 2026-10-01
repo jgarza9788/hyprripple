@@ -14,7 +14,7 @@ namespace {
         ;
 
     struct SUniforms {
-        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, clipBox = -1, clipRadius = -1, useClip = -1;
+        GLint boxPos = -1, boxSize = -1, center = -1, radius = -1, alpha = -1, inkColor = -1, softness = -1, ringWidth = -1, mode = -1, progress = -1, time = -1, pxScale = -1, seed = -1, clipBox = -1, clipRadius = -1, useClip = -1;
     };
 
     SP<CShader> s_shader;
@@ -43,6 +43,11 @@ namespace {
         s_u.inkColor   = glGetUniformLocation(p, "inkColor");
         s_u.softness   = glGetUniformLocation(p, "softness");
         s_u.ringWidth  = glGetUniformLocation(p, "ringWidth");
+        s_u.mode       = glGetUniformLocation(p, "mode");
+        s_u.progress   = glGetUniformLocation(p, "progress");
+        s_u.time       = glGetUniformLocation(p, "time");
+        s_u.pxScale    = glGetUniformLocation(p, "pxScale");
+        s_u.seed       = glGetUniformLocation(p, "seed");
         s_u.clipBox    = glGetUniformLocation(p, "clipBox");
         s_u.clipRadius = glGetUniformLocation(p, "clipRadius");
         s_u.useClip    = glGetUniformLocation(p, "useClip");
@@ -66,7 +71,7 @@ std::optional<CBox> CRipplePassElement::boundingBox() {
         return std::nullopt;
 
     const float pad = m_data.ripple.softness + 2.f;
-    const float r   = m_data.radius + pad;
+    const float r   = m_data.radius * (m_data.ripple.mode == 2 ? 1.08f : 1.f) + pad;
     CBox        box{m_data.ripple.center.x - r, m_data.ripple.center.y - r, r * 2.0, r * 2.0};
     if (m_data.ripple.clip)
         box = box.intersection(m_data.ripple.clipBox.copy().expand(2));
@@ -85,7 +90,7 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
     // Square box around the ripple, monitor-local physical pixels. Keeping the
     // box centred on the ripple makes the uv -> pixel mapping orientation-free.
     const Vector2D centerPx = (rp.center - mon->m_position) * scale;
-    const float    half     = (m_data.radius + rp.softness + 2.f) * scale;
+    const float    half     = (m_data.radius * (rp.mode == 2 ? 1.08f : 1.f) + rp.softness + 2.f) * scale;
     CBox           box{centerPx.x - half, centerPx.y - half, half * 2.0, half * 2.0};
     box.round();
 
@@ -104,7 +109,12 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
     glUniform1f(s_u.alpha, m_data.alpha);
     glUniform4f(s_u.inkColor, rp.color.r, rp.color.g, rp.color.b, rp.color.a);
     glUniform1f(s_u.softness, rp.softness * scale);
-    glUniform1f(s_u.ringWidth, rp.ring ? std::max(rp.ringWidth, 1.f) * scale : 0.f);
+    glUniform1f(s_u.ringWidth, std::max(rp.ringWidth, 1.f) * scale);
+    glUniform1i(s_u.mode, rp.mode);
+    glUniform1f(s_u.progress, m_data.t);
+    glUniform1f(s_u.time, m_data.time);
+    glUniform1f(s_u.pxScale, scale);
+    glUniform1f(s_u.seed, rp.seed);
 
     if (rp.clip) {
         const CBox clip = rp.clipBox.copy().translate(-mon->m_position).scale(scale);

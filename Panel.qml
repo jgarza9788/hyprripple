@@ -71,6 +71,17 @@ Item {
     if (!c.ok) { root.errorText = c.error; return }
     root.errorText = ""
 
+    // A preset brings its own opacity/softness/duration; apply them as one
+    // batch, then fire a ripple so the pick is visible straight away.
+    if (key === "style") {
+      root.settings = Model.applyPreset(root.settings, c.value)
+      applyAllProc.command = Model.batchCommand(root.settings)
+      applyAllProc.running = true
+      persistTimer.restart()
+      previewTimer.restart()
+      return
+    }
+
     var next = {}
     for (var k in root.settings) next[k] = root.settings[k]
     next[key] = c.value
@@ -157,6 +168,12 @@ Item {
     repeat: true
     running: root.opened
     onTriggered: if (!statusProc.running) statusProc.running = true
+  }
+
+  Timer {
+    id: previewTimer
+    interval: 120
+    onTriggered: root.test()
   }
 
   Timer {

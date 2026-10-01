@@ -43,7 +43,27 @@ float SRipple::progress(steady_clock::time_point now) const {
     return std::clamp(t, 0.f, 1.f);
 }
 
+// Material 3's standard easing, cubic-bezier(0.2, 0, 0, 1).
+static float m3Ease(float x) {
+    // Solve bezier x(u) = x by Newton, then return y(u).
+    constexpr float x1 = 0.2f, y1 = 0.f, x2 = 0.f, y2 = 1.f;
+    auto            bx = [&](float u) { return 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u; };
+    auto            by = [&](float u) { return 3 * (1 - u) * (1 - u) * u * y1 + 3 * (1 - u) * u * u * y2 + u * u * u; };
+    float           u  = x;
+    for (int i = 0; i < 8; ++i) {
+        const float dx = 3 * (1 - u) * (1 - u) * x1 + 6 * (1 - u) * u * (x2 - x1) + 3 * u * u * (1 - x2);
+        if (std::abs(dx) < 1e-5f)
+            break;
+        u = std::clamp(u - (bx(u) - x) / dx, 0.f, 1.f);
+    }
+    return by(u);
+}
+
 float SRipple::currentRadius(float t) const {
+    if (mode == 2) {
+        // M3: start at 20% of the final size, grow over 75% of the life.
+        return maxRadius * (0.2f + 0.8f * m3Ease(std::min(t / 0.75f, 1.f)));
+    }
     // Spread over the first 70% of the life with a strong ease-out
     // (Material's "standard decelerate"), starting from a small seed.
     const float e    = std::min(t / 0.7f, 1.f);
@@ -52,6 +72,12 @@ float SRipple::currentRadius(float t) const {
 }
 
 float SRipple::currentAlpha(float t) const {
+    if (mode == 2) {
+        const float in  = std::min(t / 0.04f, 1.f);
+        const float x   = std::clamp((t - 0.55f) / 0.45f, 0.f, 1.f);
+        const float out = 1.f - x * x * (3.f - 2.f * x);
+        return opacity * in * out;
+    }
     // Quick fade-in, hold, then fade out over the back half.
     const float in  = std::min(t / 0.06f, 1.f);
     const float x   = std::clamp((t - 0.45f) / 0.55f, 0.f, 1.f);
@@ -60,7 +86,8 @@ float SRipple::currentAlpha(float t) const {
 }
 
 CBox SRipple::bounds() const {
-    const float r = maxRadius + softness + 4.f;
+    // sparkle's turbulent rim can reach ~5% past the radius
+    const float r = maxRadius * (mode == 2 ? 1.08f : 1.f) + softness + 4.f;
     CBox        box{center.x - r, center.y - r, r * 2.0, r * 2.0};
     if (clip)
         box = box.intersection(clipBox.copy().expand(4));
@@ -106,7 +133,7 @@ namespace {
         s.radius          = c.radius->value();
         s.workspaceRadius = c.workspaceRadius->value();
         s.softness        = c.softness->value();
-        s.style           = c.style->value();
+        s.style           = c.style->value() == "fill" ? "classic" : c.style->value();
         s.ringWidth       = c.ringWidth->value();
         s.onClick         = c.onClick->value();
         s.onFocus         = c.onFocus->value();
@@ -192,8 +219,13 @@ namespace {
         }
         if (key == "on_click")
             return asEnum(s.onClick, {"none", "left", "any"});
-        if (key == "style")
-            return asEnum(s.style, {"fill", "ring"});
+        if (key == "style") {
+            if (value == "fill") { // pre-preset name
+                s.style = "classic";
+                return "";
+            }
+            return asEnum(s.style, {"classic", "ring", "sparkle"});
+        }
         if (key == "focus_origin")
             return asEnum(s.focusOrigin, {"cursor", "center"});
         if (key == "workspace_radius") {
@@ -237,7 +269,8 @@ namespace {
                 .duration  = s.duration / 1000.f,
                 .opacity   = s.opacity,
                 .color     = Theme::resolve(s.color),
-                .ring      = s.style == "ring",
+                .mode      = s.style == "ring" ? 1 : s.style == "sparkle" ? 2 : 0,
+                .seed      = (float)(std::rand() % 1000) * 0.137f,
                 .ringWidth = s.ringWidth,
                 .softness  = s.softness,
         };
@@ -370,6 +403,8 @@ namespace {
                 .ripple = r,
                 .radius = r.currentRadius(t),
                 .alpha  = r.currentAlpha(t),
+                .t      = t,
+                .time   = std::chrono::duration<float>(now - r.start).count(),
             }));
         }
     }
@@ -505,7 +540,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     c.radius          = addValue<CV::Float>("plugin:hyprripple:radius", "Click ripple radius (logical px)", Config::FLOAT{d.radius});
     c.workspaceRadius = addValue<CV::String>("plugin:hyprripple:workspace_radius", "'screen' or px", Config::STRING{d.workspaceRadius});
     c.softness        = addValue<CV::Float>("plugin:hyprripple:softness", "Edge feather (logical px)", Config::FLOAT{d.softness});
-    c.style           = addValue<CV::String>("plugin:hyprripple:style", "fill | ring", Config::STRING{d.style});
+    c.style           = addValue<CV::String>("plugin:hyprripple:style", "classic | ring | sparkle", Config::STRING{d.style});
     c.ringWidth       = addValue<CV::Float>("plugin:hyprripple:ring_width", "Ring thickness (logical px)", Config::FLOAT{d.ringWidth});
     c.onClick         = addValue<CV::String>("plugin:hyprripple:on_click", "none | left | any", Config::STRING{d.onClick});
     c.onFocus         = addValue<CV::Bool>("plugin:hyprripple:on_focus", "Ripple on window focus change", Config::BOOL{d.onFocus});

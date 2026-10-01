@@ -26,7 +26,7 @@ struct SSettings {
     float       radius          = 140.f;    // logical px, click ripples
     std::string workspaceRadius = "screen"; // "screen" or a number of logical px
     float       softness        = 2.0f;     // logical px
-    std::string style           = "fill";   // fill | ring
+    std::string style           = "classic"; // classic | ring | sparkle
     float       ringWidth       = 6.0f;     // logical px, style = ring
     std::string onClick         = "left";   // none | left | any
     bool        onFocus         = true;
@@ -44,7 +44,8 @@ struct SRipple {
     float                                 duration;  // seconds
     float                                 opacity;
     CHyprColor                            color;
-    bool                                  ring      = false;
+    int                                   mode      = 0;    // 0 classic, 1 ring, 2 sparkle
+    float                                 seed      = 0.f;  // per-ripple noise offset
     float                                 ringWidth = 0.f;
     float                                 softness  = 2.f;
     bool                                  clip      = false;

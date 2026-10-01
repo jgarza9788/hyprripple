@@ -10,7 +10,7 @@ if hl.plugin.hyprripple then
     focus_hover = false,
     on_workspace = true,
     color = "accent",
-    style = "fill",
+    style = "classic",
     opacity = 0.28,
     radius = 140,
     softness = 2,
