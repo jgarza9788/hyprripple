@@ -123,7 +123,9 @@ spawns, so a theme switch recolors ripples with no reload.
 ```sh
 hyprctl hyprripple get                    # current settings (JSON)
 hyprctl hyprripple set opacity 0.2        # live, no reload
-hyprctl hyprripple trigger [x y [radius]] [above]  # ripple now; "above" draws over bars
+hyprctl hyprripple trigger [x y [radius]] [above] [style=<preset>]
+                                          # ripple now; "above" draws over bars;
+                                          # style= previews a preset without changing settings
 hyprctl hyprripple sharing [reset]        # screen-share pause state
 hyprctl hyprripple stats                  # counters, frames drawn, live ripples
 ```

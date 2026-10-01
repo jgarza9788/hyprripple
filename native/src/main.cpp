@@ -234,6 +234,7 @@ namespace {
         bool                held    = false;
         uint64_t            holdKey = 0;
         bool                force   = false; // manual trigger: ignore exclusions
+        std::string         style;           // non-empty: render this preset instead of the setting
     };
 
     // Shared gate for every automatic trigger.
@@ -269,14 +270,14 @@ namespace {
                 .duration      = s.duration / 1000.f,
                 .opacity       = s.opacity,
                 .color         = Theme::resolve(s.color),
-                .mode          = Logic::styleMode(s.style),
+                .mode          = Logic::styleMode(sp.style.empty() ? s.style : sp.style),
                 .seed          = std::uniform_real_distribution<float>(0.f, 137.f)(g_state->rng),
                 .ringWidth     = s.ringWidth,
                 .sparkleAmount = s.sparkleAmount,
                 .distortion    = s.distortion,
                 .softness      = s.softness,
                 // waves travel and fade on their own: hold doesn't apply
-                .held          = sp.held && s.hold && !Logic::isWaveMode(Logic::styleMode(s.style)),
+                .held          = sp.held && s.hold && !Logic::isWaveMode(Logic::styleMode(sp.style.empty() ? s.style : sp.style)),
                 .holdKey       = sp.holdKey,
         };
         if (sp.clip) {
@@ -589,7 +590,7 @@ namespace {
     // ── manual trigger (hyprctl / Lua) ───────────────────────────────────────
 
     // Returns false when rate limited.
-    bool manualTrigger(std::optional<Vector2D> at, std::optional<float> radius, bool above = false) {
+    bool manualTrigger(std::optional<Vector2D> at, std::optional<float> radius, bool above = false, const std::string& style = "") {
         const float now = std::chrono::duration<float>(steady_clock::now().time_since_epoch()).count();
         if (!g_state->manualLimit.allow(now))
             return false;
@@ -599,7 +600,8 @@ namespace {
         // Caller-supplied numbers: keep them in a sane layout range.
         if (at)
             at = Vector2D{std::clamp(at->x, -1e5, 1e5), std::clamp(at->y, -1e5, 1e5)};
-        if (auto* r = spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .force = true}); r && above)
+        if (auto* r = spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .force = true, .style = style});
+            r && above)
             r->above = true;
         return true;
     }
@@ -653,10 +655,24 @@ namespace {
         }
 
         if (cmd == "trigger") {
-            // optional trailing "above": draw over bars / launchers
-            const bool above = args.size() >= 2 && args.back() == "above";
-            if (above)
+            // optional trailing words: "above" draws over bars / launchers;
+            // "style=<preset>" renders one ripple in that preset without
+            // touching any setting (handy for previews and tests)
+            bool        above = false;
+            std::string style;
+            while (args.size() >= 2) {
+                if (args.back() == "above")
+                    above = true;
+                else if (args.back().starts_with("style=")) {
+                    style = args.back().substr(6);
+                    Logic::Settings probe;
+                    if (!Logic::applySetting(probe, "style", style).empty())
+                        return "error: unknown style";
+                    style = probe.style; // normalised ("fill" -> "classic")
+                } else
+                    break;
                 args.pop_back();
+            }
             std::optional<Vector2D> at;
             std::optional<float>    radius;
             if (args.size() >= 3) {
@@ -670,7 +686,7 @@ namespace {
                 if (!radius)
                     return "usage: hyprctl hyprripple trigger [x y [radius]]";
             }
-            return manualTrigger(at, radius, above) ? "ok" : "error: rate limited";
+            return manualTrigger(at, radius, above, style) ? "ok" : "error: rate limited";
         }
 
         if (cmd == "stats") {
@@ -692,7 +708,7 @@ namespace {
             return "ok";
         }
 
-        return "usage: hyprctl hyprripple [get | set <key> <value> | trigger [x y [radius]] [above] | stats | sharing [reset] | reload-config]";
+        return "usage: hyprctl hyprripple [get | set <key> <value> | trigger [x y [radius]] [above] [style=<preset>] | stats | sharing [reset] | reload-config]";
     }
 
     // hl.plugin.hyprripple.trigger([x, y [, radius]])

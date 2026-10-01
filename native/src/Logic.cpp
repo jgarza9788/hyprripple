@@ -205,10 +205,17 @@ namespace Logic {
 
     // Fraction of the life spent spreading / when the fade would start for an
     // ordinary tap. Sparkle follows Material 3's longer spread.
+    // Water keeps travelling for its whole life and fades over the last 80%
+    // of it, so the rings thin out as they spread instead of stopping dead
+    // and then vanishing.
     static float spreadLen(const Life& l) {
+        if (l.mode == MODE_WATER)
+            return duration(l);
         return duration(l) * (l.mode == 2 ? 0.75f : 0.7f);
     }
     static float nominalFadeStart(const Life& l) {
+        if (l.mode == MODE_WATER)
+            return duration(l) * 0.2f;
         return duration(l) * (l.mode == 2 ? 0.55f : 0.45f);
     }
     static float fadeLen(const Life& l) {

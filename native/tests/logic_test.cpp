@@ -125,8 +125,23 @@ int main() {
         }
         ok("water spreads monotonically", mono);
         Life w0{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.f};
-        Life w1{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.7f};
-        ok("water starts small, reaches full", spreadFraction(w0) < 0.05f && near(spreadFraction(w1), 1.f));
+        Life w1{.mode = MODE_WATER, .duration = 1.f, .elapsed = 1.f};
+        ok("water starts small, reaches full at the end", spreadFraction(w0) < 0.05f && near(spreadFraction(w1), 1.f));
+        Life wMid{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.7f};
+        ok("water still travelling at 70%", spreadFraction(wMid) < 0.95f);
+        Life wFade{.mode = MODE_WATER, .duration = 1.f, .elapsed = 0.3f};
+        ok("water fade starts early (20%)", fade(wFade) > 0.f);
+        // gentle: alpha never drops more than 4% of opacity per 1% of life
+        bool gentle = true;
+        for (int i = 1; i <= 100; ++i) {
+            Life a{.mode = MODE_WATER, .duration = 1.f, .elapsed = (i - 1) / 100.f};
+            Life b{.mode = MODE_WATER, .duration = 1.f, .elapsed = i / 100.f};
+            if (i > 6) // after the fade-in
+                gentle &= alpha(a, 1.f) - alpha(b, 1.f) <= 0.04f;
+        }
+        ok("water fade is gentle", gentle);
+        Life cl{.mode = 0, .duration = 1.f, .elapsed = 0.7f};
+        ok("classic timing unchanged", near(spreadFraction(cl), 1.f));
         Life wEnd{.mode = MODE_WATER, .duration = 1.f, .elapsed = 1.01f};
         ok("water finishes", finished(wEnd));
     }
