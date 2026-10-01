@@ -6,7 +6,10 @@ accent color.
 - **Click**: ink spreads from where you press (left button or any button).
 - **Window focus**: a bounded ripple floods the newly focused window, clipped to
   its rounded corners. Fires on keyboard focus, new windows and closed windows.
-  Hover focus (`follow_mouse`) is opt-in.
+  Hover focus (`follow_mouse`) is opt-in, and starts on the edge the mouse
+  crossed.
+- Ripples on a window ride along with it: moves, resizes, scrolling-layout
+  slides and workspace animations.
 - **Workspace switch**: a wave floods the whole monitor from the cursor.
 
 Three presets (`style`). Picking one in the panel also sets its opacity,

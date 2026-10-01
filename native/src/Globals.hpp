@@ -3,6 +3,7 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
+#include <hyprland/src/desktop/DesktopTypes.hpp>
 
 #include <chrono>
 #include <string>
@@ -51,6 +52,11 @@ struct SRipple {
     bool                                  clip      = false;
     CBox                                  clipBox;          // global logical
     float                                 clipRounding = 0.f;
+
+    // Window the ripple rides on. While it's alive the ripple keeps the same
+    // offset from the window's top-left and (if clipped) its live box.
+    PHLWINDOWREF                          anchor;
+    Vector2D                              anchorRel; // center - window box top-left
 
     // 0..1 over the ripple's life
     float progress(std::chrono::steady_clock::time_point now) const;

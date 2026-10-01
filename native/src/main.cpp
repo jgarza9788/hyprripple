@@ -257,7 +257,39 @@ namespace {
             g_state->timer->updateTimeout(TICK);
     }
 
-    void spawn(const Vector2D& center, float maxRadius, std::optional<CBox> clip = std::nullopt, float clipRounding = 0.f) {
+    // The window's box as it is drawn right now: animated position/size plus
+    // the workspace slide offset (same as the renderer applies).
+    CBox liveBox(const PHLWINDOW& w) {
+        CBox box = w->getWindowMainSurfaceBox();
+        if (w->m_workspace && !w->m_pinned)
+            box.translate(w->m_workspace->m_renderOffset->value());
+        box.translate(w->m_floatingOffset);
+        return box;
+    }
+
+    // Move an anchored ripple with its window. Returns true if it moved.
+    bool follow(SRipple& r) {
+        const auto w = r.anchor.lock();
+        if (!w || !w->m_isMapped)
+            return false;
+        const CBox     box    = liveBox(w);
+        const Vector2D center = box.pos() + r.anchorRel;
+        if (center == r.center && (!r.clip || box == r.clipBox))
+            return false;
+        r.center = center;
+        if (r.clip)
+            r.clipBox = box;
+        return true;
+    }
+
+    void anchorTo(SRipple& r, const PHLWINDOW& w) {
+        if (!w)
+            return;
+        r.anchor    = w;
+        r.anchorRel = r.center - liveBox(w).pos();
+    }
+
+    void spawn(const Vector2D& center, float maxRadius, std::optional<CBox> clip = std::nullopt, float clipRounding = 0.f, PHLWINDOW anchor = nullptr) {
         if (!g_state || !g_state->settings.enabled)
             return;
 
@@ -285,6 +317,7 @@ namespace {
             g_state->ripples.pop_front();
         }
 
+        anchorTo(r, anchor);
         g_state->ripples.push_back(r);
         g_pHyprRenderer->damageBox(r.bounds());
         armTimer();
@@ -298,6 +331,8 @@ namespace {
         const auto now = steady_clock::now();
         for (auto it = g_state->ripples.begin(); it != g_state->ripples.end();) {
             g_pHyprRenderer->damageBox(it->bounds());
+            if (follow(*it))
+                g_pHyprRenderer->damageBox(it->bounds());
             if (it->progress(now) >= 1.f)
                 it = g_state->ripples.erase(it);
             else
@@ -314,6 +349,21 @@ namespace {
         return std::sqrt(dx * dx + dy * dy);
     }
 
+    // The point on box's border nearest p (p clamped into the box first).
+    Vector2D entryPoint(const CBox& box, const Vector2D& p) {
+        const double x  = std::clamp(p.x, box.x, box.x + box.w);
+        const double y  = std::clamp(p.y, box.y, box.y + box.h);
+        const double dl = x - box.x, dr = box.x + box.w - x, dt = y - box.y, db = box.y + box.h - y;
+        const double m  = std::min({dl, dr, dt, db});
+        if (m == dl)
+            return {box.x, y};
+        if (m == dr)
+            return {box.x + box.w, y};
+        if (m == dt)
+            return {x, box.y};
+        return {x, box.y + box.h};
+    }
+
     // ── triggers ─────────────────────────────────────────────────────────────
 
     void onMouseButton(const IPointer::SButtonEvent& ev) {
@@ -324,12 +374,25 @@ namespace {
             return;
         g_state->lastClick = steady_clock::now();
         g_state->nClick++;
-        spawn(g_pInputManager->getMouseCoordsInternal(), s.radius);
+        const Vector2D cursor  = g_pInputManager->getMouseCoordsInternal();
+        const auto     focused = Desktop::focusState()->window();
+        spawn(cursor, s.radius, std::nullopt, 0.f, focused && liveBox(focused).containsPoint(cursor) ? focused : nullptr);
     }
 
     void onWindowActive(PHLWINDOW window, Desktop::eFocusReason reason) {
         const auto& s = g_state->settings;
-        if (!s.onFocus || !window || !window->m_isMapped || window->isHidden())
+        if (!window || !window->m_isMapped || window->isHidden())
+            return;
+
+        // Click-to-focus: the click ripple spawned a moment ago (before focus
+        // moved) belongs to this window, so let it ride along with it.
+        if (reason == Desktop::FOCUS_REASON_CLICK && !g_state->ripples.empty()) {
+            auto& last = g_state->ripples.back();
+            if (steady_clock::now() - last.start < milliseconds(300) && last.anchor.lock() != window && liveBox(window).containsPoint(last.center))
+                anchorTo(last, window);
+        }
+
+        if (!s.onFocus)
             return;
 
         switch (reason) {
@@ -354,14 +417,18 @@ namespace {
         g_state->nFocus++;
         g_state->lastFocusReason = (int)reason;
 
-        const CBox     box    = window->getWindowMainSurfaceBox();
+        const CBox     box    = liveBox(window);
         const Vector2D cursor = g_pInputManager->getMouseCoordsInternal();
-        const Vector2D origin = s.focusOrigin == "cursor" && box.containsPoint(cursor) ? cursor : box.middle();
+        Vector2D       origin = s.focusOrigin == "cursor" && box.containsPoint(cursor) ? cursor : box.middle();
+        // Hover focus: the mouse just slid in across an edge, so start on that
+        // edge, at the point it crossed (the edge nearest the cursor).
+        if (reason == Desktop::FOCUS_REASON_FFM)
+            origin = entryPoint(box, cursor);
 
         if (s.bounded)
-            spawn(origin, coverRadius(origin, box), box, window->rounding());
+            spawn(origin, coverRadius(origin, box), box, window->rounding(), window);
         else
-            spawn(origin, std::max<float>(s.radius, std::min(box.w, box.h) * 0.5f));
+            spawn(origin, std::max<float>(s.radius, std::min(box.w, box.h) * 0.5f), std::nullopt, 0.f, window);
     }
 
     void onWorkspaceActive(PHLWORKSPACE ws) {
@@ -395,7 +462,8 @@ namespace {
 
         const CBox monBox{mon->m_position, mon->m_size};
         const auto now = steady_clock::now();
-        for (const auto& r : g_state->ripples) {
+        for (auto& r : g_state->ripples) {
+            follow(r);
             if (!r.bounds().overlaps(monBox))
                 continue;
             const float t = r.progress(now);
@@ -463,9 +531,15 @@ namespace {
             return "ok";
         }
 
-        if (cmd == "stats")
-            return std::format(R"({{"click":{},"focus":{},"last_focus_reason":{},"workspace":{},"manual":{},"active":{}}})", g_state->nClick, g_state->nFocus,
-                               g_state->lastFocusReason, g_state->nWorkspace, g_state->nManual, g_state->ripples.size());
+        if (cmd == "stats") {
+            std::string list;
+            for (const auto& r : g_state->ripples) {
+                list += std::format(R"({}{{"x":{:.0f},"y":{:.0f},"anchored":{},"clip":[{:.0f},{:.0f},{:.0f},{:.0f}]}})", list.empty() ? "" : ",", r.center.x, r.center.y,
+                                    !r.anchor.expired(), r.clip ? r.clipBox.x : 0, r.clip ? r.clipBox.y : 0, r.clip ? r.clipBox.w : 0, r.clip ? r.clipBox.h : 0);
+            }
+            return std::format(R"({{"click":{},"focus":{},"last_focus_reason":{},"workspace":{},"manual":{},"active":{},"ripples":[{}]}})", g_state->nClick, g_state->nFocus,
+                               g_state->lastFocusReason, g_state->nWorkspace, g_state->nManual, g_state->ripples.size(), list);
+        }
 
         if (cmd == "reload-config") {
             loadFromConfig();
