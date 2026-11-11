@@ -16,9 +16,10 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/values/ConfigValues.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
@@ -30,7 +31,7 @@
 #include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/desktop/state/ViewHitTester.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprutils/signal/Listener.hpp>
 
 extern "C" {
@@ -87,7 +88,7 @@ namespace {
         std::deque<SRipple>                                 ripples;
         std::vector<Hyprutils::Signal::CHyprSignalListener> listeners;
         SP<CEventLoopTimer>                                 sweep;
-        SP<SHyprCtlCommand>                                 ctl;
+        SP<IPC::Socket1::SCommand>                         ctl;
         steady_clock::time_point                            lastClick{}, lastWorkspace{};
         // Active screenshares by name, from screenshare start/stop events.
         // (Hyprland's own screenshare manager isn't safely reachable from a
@@ -125,9 +126,9 @@ namespace {
     // the workspace slide offset (same as the renderer applies).
     CBox liveBox(const PHLWINDOW& w) {
         CBox box = w->getWindowMainSurfaceBox();
-        if (w->m_workspace && !w->m_pinned)
+        if (w->m_workspace && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED))
             box.translate(w->m_workspace->m_renderOffset->value());
-        box.translate(w->m_floatingOffset);
+        box.translate(w->presentation().floatingOffset());
         return box;
     }
 
@@ -140,7 +141,7 @@ namespace {
 
     bool excluded(const PHLWINDOW& w) {
         const auto& list = g_state->settings.exclude;
-        return w && !list.empty() && Logic::classExcluded(list, w->m_class);
+        return w && !list.empty() && Logic::classExcluded(list, w->metadata().appID());
     }
 
     // ── settings ─────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ namespace {
     // Move an anchored ripple with its window.
     void follow(SRipple& r) {
         const auto w = r.anchor.lock();
-        if (!w || !w->m_isMapped)
+        if (!w || !w->mapped())
             return;
         const CBox box = liveBox(w);
         r.center       = box.pos() + r.anchorRel;
@@ -329,7 +330,7 @@ namespace {
         g_state->nPre++;
         const auto now = steady_clock::now();
         prune(now);
-        const CBox monBox{mon->m_position, mon->m_size};
+        const CBox monBox{mon->m_position.x, mon->m_position.y, mon->m_size.x, mon->m_size.y};
         for (auto& r : g_state->ripples) {
             follow(r);
             if (r.bounds().overlaps(monBox) || (r.lastBounds && r.lastBounds->overlaps(monBox)))
@@ -341,7 +342,7 @@ namespace {
     // for its next frame, so the animation runs at the monitor's refresh
     // instead of whenever something else happens to redraw.
     void onPostRender(const PHLMONITOR& mon) {
-        const CBox monBox{mon->m_position, mon->m_size};
+        const CBox monBox{mon->m_position.x, mon->m_position.y, mon->m_size.x, mon->m_size.y};
         bool       any = false;
         for (auto& r : g_state->ripples) {
             if (!r.bounds().overlaps(monBox))
@@ -368,20 +369,25 @@ namespace {
 
     // Window ripples go in right after windows (under bars and launchers);
     // ripples on a bar / launcher go in at the last moment, above layers.
-    void onRenderStage(eRenderStage stage) {
-        if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty() ||
-            g_pHyprRenderer->m_bRenderingSnapshot)
+    void onRenderStage(const Event::SRenderStageEvent& ev) {
+        const auto stage = ev.stage;
+        if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty())
             return;
-        const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        const auto mon = ev.monitor;
         if (!mon)
             return;
         if (stage == RENDER_POST) {
             onPostRender(mon);
             return;
         }
+        if (!ev.context)
+            return;
+        auto& ctx = ev.context->get();
+        if (ctx.m_renderingSnapshot)
+            return;
         const bool above = stage == RENDER_LAST_MOMENT;
 
-        const CBox monBox{mon->m_position, mon->m_size};
+        const CBox monBox{mon->m_position.x, mon->m_position.y, mon->m_size.x, mon->m_size.y};
         const auto now = steady_clock::now();
         bool       drew = false;
         for (auto& r : g_state->ripples) {
@@ -389,7 +395,7 @@ namespace {
                 continue;
             drew            = true;
             const auto life = r.life(now);
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRipplePassElement>(CRipplePassElement::SData{
+            ctx.m_pass.add(makeUnique<CRipplePassElement>(CRipplePassElement::SData{
                 .ripple = r,
                 .radius = r.maxRadius * Logic::spreadFraction(life),
                 .alpha  = Logic::alpha(life, r.opacity),
@@ -409,7 +415,7 @@ namespace {
     PHLWINDOW windowAtPoint(const Vector2D& p) {
         const auto w = Desktop::viewState()->hitTest().windowAt(
             p, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-        return w && w->m_isMapped && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
+        return w && w->mapped() && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
     }
 
     // A bar, launcher or other top/overlay layer surface under the point.
@@ -420,7 +426,7 @@ namespace {
         for (int layer = 3; layer >= 2; --layer) // overlay, then top
             for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
                 const auto ls = ref.lock();
-                if (ls && ls->m_mapped && ls->m_geometry.containsPoint(p))
+                if (ls && ls->mapped() && ls->m_geometry.containsPoint(p))
                     return ls;
             }
         return nullptr;
@@ -433,7 +439,7 @@ namespace {
             return;
         r.clip         = true;
         r.clipBox      = liveBox(w);
-        r.clipRounding = w->rounding();
+        r.clipRounding = w->presentation().rounding();
     }
 
     // Press-style triggers (mouse, touch, pen) share this: held ink that
@@ -508,7 +514,7 @@ namespace {
 
     void onWindowActive(PHLWINDOW window, Desktop::eFocusReason reason) {
         const auto& s = g_state->settings;
-        if (!window || !window->m_isMapped || window->isHidden())
+        if (!window || !window->mapped() || window->isHidden())
             return;
 
         // Click-to-focus: the click ripple spawned a moment ago (before focus
@@ -563,7 +569,7 @@ namespace {
         }
 
         if (s.bounded)
-            spawn({.center = origin, .radius = (float)Logic::coverRadius(vec(origin), rect(box)), .clip = box, .clipRounding = window->rounding(), .anchor = window});
+            spawn({.center = origin, .radius = (float)Logic::coverRadius(vec(origin), rect(box)), .clip = box, .clipRounding = window->presentation().rounding(), .anchor = window});
         else
             spawn({.center = origin, .radius = std::max<float>(s.radius, std::min(box.w, box.h) * 0.5f), .anchor = window});
     }
@@ -615,12 +621,12 @@ namespace {
     std::string setFromCaller(const std::string& key, const std::string& value) {
         const std::string before = g_state->settings.style;
         auto              err    = Logic::applySetting(g_state->settings, key, value);
-        if (err.empty() && key == "style" && g_state->settings.style != before && g_pEventManager)
-            g_pEventManager->postEvent(SHyprIPCEvent{"hyprripplestyle", before + "," + g_state->settings.style});
+        if (err.empty() && key == "style" && g_state->settings.style != before && IPC::Socket2::sock())
+            IPC::Socket2::sock()->postEvent(IPC::Socket2::SEvent{"hyprripplestyle", before + "," + g_state->settings.style});
         return err;
     }
 
-    std::string onHyprctl(eHyprCtlOutputFormat, std::string request) {
+    std::string onHyprctl(std::string request) {
         if (!g_state)
             return "hyprripple: not loaded";
         if (request.size() > 2048)
@@ -814,7 +820,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprripple", "trigger", luaTrigger);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprripple", "set", luaSet);
 
-    g_state->ctl = HyprlandAPI::registerHyprCtlCommand(PHANDLE, SHyprCtlCommand{.name = "hyprripple", .exact = false, .fn = onHyprctl});
+    g_state->ctl = HyprlandAPI::registerHyprCtlCommand(PHANDLE, IPC::Socket1::SCommand{.name = "hyprripple", .match = IPC::Socket1::COMMAND_MATCH_PREFIX, .handler = [](const IPC::Socket1::SRequest& r) { return IPC::Socket1::SResponse(onHyprctl(r.command)); }});
 
     auto& ev = Event::bus()->m_events;
     g_state->listeners.push_back(ev.input.mouse.button.listen([](const IPointer::SButtonEvent& e, Event::SCallbackInfo&) {
@@ -858,7 +864,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 g_state->shares.erase(name);
     }));
     g_state->listeners.push_back(ev.render.pre.listen([](PHLMONITOR mon) { onPreRender(mon); }));
-    g_state->listeners.push_back(ev.render.stage.listen([](eRenderStage stage) { onRenderStage(stage); }));
+    g_state->listeners.push_back(ev.render.stage.listen([](const Event::SRenderStageEvent& e) { onRenderStage(e); }));
     g_state->listeners.push_back(ev.config.reloaded.listen([]() {
         if (g_state)
             loadFromConfig();
@@ -891,7 +897,6 @@ APICALL EXPORT void PLUGIN_EXIT() {
     for (const auto& r : g_state->ripples)
         g_pHyprRenderer->damageBox(r.lastBounds.value_or(r.bounds()));
 
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CRipplePassElement");
     RippleShader::destroy();
     g_state.reset();
 }

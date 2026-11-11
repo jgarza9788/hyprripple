@@ -31,8 +31,8 @@ namespace {
     // Copy everything rendered so far into s_sample, then hand the target
     // back. Whole-frame copy: one blit, and the shader can sample at
     // gl_FragCoord without any coordinate juggling.
-    bool copyFrame() {
-        const auto src   = g_pHyprRenderer->m_renderData.currentFB;
+    bool copyFrame(Render::CRenderContext& ctx) {
+        const auto src   = ctx.m_data.currentFB;
         auto*      srcGL = asGL(src);
         if (!srcGL || src->m_size.x < 1 || src->m_size.y < 1)
             return false;
@@ -108,14 +108,14 @@ static float overreach(const SRipple& rp, float radius) {
     return radius * (rp.mode == 2 ? 0.08f : 0.f) + Logic::waveBand(rp.mode, radius) + Logic::waveReach(rp.mode, rp.maxRadius, rp.distortion) + rp.softness + 2.f;
 }
 
-bool CRipplePassElement::disableSimplification() {
+bool CRipplePassElement::disableSimplification(Render::CRenderContext&) {
     return Logic::isSamplingMode(m_data.ripple.mode);
 }
 
 CRipplePassElement::CRipplePassElement(const SData& data) : m_data(data) {}
 
-std::optional<CBox> CRipplePassElement::boundingBox() {
-    const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
+std::optional<CBox> CRipplePassElement::boundingBox(Render::CRenderContext& ctx) {
+    const auto mon = ctx.m_data.pMonitor.lock();
     if (!mon)
         return std::nullopt;
 
@@ -127,8 +127,8 @@ std::optional<CBox> CRipplePassElement::boundingBox() {
     return box;
 }
 
-std::vector<UP<IPassElement>> CRipplePassElement::draw() {
-    const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
+std::vector<UP<IPassElement>> CRipplePassElement::draw(Render::CRenderContext& ctx) {
+    const auto mon = ctx.m_data.pMonitor.lock();
     if (!mon || m_data.alpha <= 0.001f || m_data.radius <= 0.f || !ensureShader())
         return {};
 
@@ -143,11 +143,11 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
     box.round();
 
     const auto transform = Math::wlTransformToHyprutils(Math::invertTransform(mon->m_transform));
-    Mat3x3     proj      = g_pHyprRenderer->projectBoxToTarget(box, transform);
+    Mat3x3     proj      = g_pHyprRenderer->projectBoxToTarget(ctx, box, transform);
     proj.transpose();
 
     const bool sampling = Logic::isSamplingMode(rp.mode);
-    if (sampling && !copyFrame())
+    if (sampling && !copyFrame(ctx))
         return {};
 
     Render::GL::g_pHyprOpenGL->blend(true);
@@ -188,9 +188,9 @@ std::vector<UP<IPassElement>> CRipplePassElement::draw() {
         glUniform1i(s_u.useClip, 0);
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
-    Render::GL::g_pHyprOpenGL->scissor(box);
+    Render::GL::g_pHyprOpenGL->scissor(ctx, box);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    Render::GL::g_pHyprOpenGL->scissor(nullptr);
+    Render::GL::g_pHyprOpenGL->disableScissor();
     glBindVertexArray(0);
 
     return {};
