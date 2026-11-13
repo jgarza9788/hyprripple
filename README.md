@@ -1,4 +1,4 @@
-# HyprRipple
+# HyprRipple — Water Click Ripples
 
 Material Design ink ripples for Hyprland, drawn by the compositor itself in
 your Omarchy theme's accent colour. Click, tap, change focus or switch
@@ -6,7 +6,7 @@ workspace and the screen answers with a ripple. It can be a classic splash, a
 Material 3 sparkle, or an effect on the screen itself: inverted, refracted
 like water, or bent through a rainbow lens.
 
-![HyprRipple presets](preview.png)
+![A strong Water ripple refracts terminal text on an Omarchy desktop](preview.png)
 
 ## Install
 
@@ -140,6 +140,13 @@ keeps your trigger preferences.
 пространства** и **Рост при удержании**. Для **Максимум волн** укажите **2**.
 
 ![Three left clicks with the short Water preset](docs/water-short.gif)
+
+The desktop capture compares a **strong Water splash** (205 px, 450 ms,
+maximum distortion) with **Water (Short)** (80 px, 250 ms), first over
+terminal text and then over the desktop wallpaper. It was recorded in a
+live Omarchy session with the [Everforest background](https://github.com/omacom/omarchy/blob/v4.5.0/themes/everforest/backgrounds/1-tree-tops.webp).
+
+![Strong Water and Water (Short) on an Omarchy desktop](docs/water-click-desktop.gif)
 
 ### How ripples behave
 

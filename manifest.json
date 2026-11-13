@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "jgarza.hyprripple",
-  "name": "HyprRipple",
-  "version": "0.2.0",
+  "name": "HyprRipple — Water Click Ripples",
+  "version": "0.3.0",
   "author": "jgarza",
   "license": "MIT",
-  "description": "Material Design ink ripples drawn by Hyprland itself, in your theme's accent colour: on clicks, taps, focus changes and workspace switches. Includes Water and a compact Water (Short) preset. After adding, run ./install in the plugin folder to build the native plugin. Settings: Omarchy menu > Style > HyprRipple.",
+  "description": "Water click ripples on your Omarchy desktop, drawn by Hyprland. Choose a full water splash or the compact 250 ms Water (Short) preset, plus Material ink and other effects. After adding, run ./install in the plugin folder to build the native plugin. Settings: Omarchy menu > Style > HyprRipple.",
   "kinds": [
     "panel",
     "service"
