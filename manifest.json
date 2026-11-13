@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "author": "jgarza",
   "license": "MIT",
-  "description": "Material Design ink ripples drawn by Hyprland itself, in your theme's accent colour: on clicks, taps, focus changes and workspace switches. Six presets: Classic, Ring, Sparkle, Negative, Water, Prism. After adding, run ./install in the plugin folder to build the native plugin. Settings: Omarchy menu > Style > HyprRipple.",
+  "description": "Material Design ink ripples drawn by Hyprland itself, in your theme's accent colour: on clicks, taps, focus changes and workspace switches. Includes Water and a compact Water (Short) preset. After adding, run ./install in the plugin folder to build the native plugin. Settings: Omarchy menu > Style > HyprRipple.",
   "kinds": [
     "panel",
     "service"

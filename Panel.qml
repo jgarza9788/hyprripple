@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -19,8 +20,8 @@ Item {
   property var manifest: null
 
   readonly property string luaPath: Quickshell.env("HOME") + "/.config/hypr/hyprripple.lua"
-  // Per-preset opacity/radius/softness memory, owned by Service.qml; the
-  // panel only clears it on "reset everything".
+  // Preset memory is owned by Service.qml; the panel only clears it on
+  // "reset everything".
   readonly property string memoryPath: Quickshell.env("HOME") + "/.config/omarchy/jgarza.hyprripple/presets.json"
 
   property bool opened: false
@@ -28,8 +29,10 @@ Item {
   property var status: null          // `hyprctl hyprripple get`, null = plugin not loaded
   property int sectionIndex: 0
   property int cursorIndex: 0
-  property string errorText: ""
-  property string statusText: ""
+  property var panelError: null
+  property string statusKey: ""
+  readonly property string errorText: root.errorMessage(root.panelError)
+  readonly property string statusText: root.statusKey === "" ? "" : panelStrings.t("status." + root.statusKey)
   property bool selfWrite: false
 
   readonly property string section: Model.SECTIONS[sectionIndex]
@@ -37,17 +40,37 @@ Item {
   onRowsChanged: if (cursorIndex >= rows.length) cursorIndex = Math.max(0, rows.length - 1)
   readonly property bool pluginLoaded: status !== null
 
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
-  property color scrim: Color.menu.scrim
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color accent: Commons.Color.accent
+  property color scrim: Commons.Color.menu.scrim
   property string fontFamily: Style.font.menuFamily
+
+  Commons.Translations { id: panelStrings; directory: Qt.resolvedUrl("i18n") }
+
+  function errorMessage(error) {
+    if (!error) return ""
+    if (!error.code) return error.fallback || ""
+    var message = panelStrings.t("error." + error.code, error.fallback)
+    if (error.path !== undefined) return message.arg(error.path)
+    if (error.setting === undefined) return message
+
+    var item = Model.itemFor(error.setting)
+    message = message.arg(item ? panelStrings.t("setting." + item.key + ".label", item.label) : error.setting)
+    if (error.code === "invalidEnum" && item) {
+      var choices = item.options.map(function(option) {
+        return panelStrings.t("setting." + item.key + ".option." + option.value, option.label)
+      }).join(", ")
+      message = message.arg(choices)
+    }
+    return message
+  }
 
   // -------------------------------------------------------------- lifecycle
 
   function open(payloadJson) {
     root.opened = true
-    root.errorText = ""
+    root.panelError = null
     luaFile.reload()
     statusProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -71,8 +94,8 @@ Item {
 
   // ----------------------------------------------------------------- values
 
-  // Reset one value to its default - for opacity/radius/softness that's the
-  // current preset's default. A preset reset only restores `style`; the
+  // Reset one value to its default, using the current preset's defaults
+  // for settings each preset remembers. A preset reset only restores `style`; the
   // other values keep their own reset buttons.
   function resetValue(key) {
     var item = Model.itemFor(key)
@@ -81,8 +104,11 @@ Item {
 
   function setValue(key, raw, commit, noPreset) {
     var c = Model.coerce(key, raw)
-    if (!c.ok) { root.errorText = c.error; return }
-    root.errorText = ""
+    if (!c.ok) {
+      root.panelError = { code: c.errorCode, setting: key, fallback: c.error }
+      return
+    }
+    root.panelError = null
 
     // A preset brings its own opacity/softness/duration; apply them as one
     // batch, then fire a ripple so the pick is visible straight away.
@@ -139,7 +165,7 @@ Item {
     var next = Model.renderLua(root.settings)
     if (next === luaFile.text()) return
     root.selfWrite = true
-    root.statusText = "Saving…"
+    root.statusKey = "saving"
     luaFile.setText(next)
   }
 
@@ -200,7 +226,10 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var out = String(text || "").trim()
-        if (out.indexOf("error") === 0) root.errorText = out
+        if (out.indexOf("error") === 0) {
+          console.warn("HyprRipple:", out.slice(0, 512))
+          root.panelError = { code: "apply" }
+        }
       }
     }
     onExited: Qt.callLater(root.flushPending)
@@ -239,8 +268,8 @@ Item {
 
   Timer {
     interval: 1600
-    running: root.statusText === "Saved"
-    onTriggered: root.statusText = ""
+    running: root.statusKey === "saved"
+    onTriggered: root.statusKey = ""
   }
 
   FileView {
@@ -248,7 +277,7 @@ Item {
     path: root.memoryPath
     atomicWrites: true
     printErrors: false
-    onSaveFailed: root.errorText = "Could not write " + root.memoryPath
+    onSaveFailed: root.panelError = { code: "write", path: root.memoryPath }
   }
 
   FileView {
@@ -259,8 +288,12 @@ Item {
     watchChanges: true
     onLoaded: root.settings = Model.parseLua(text())
     onLoadFailed: root.settings = Model.defaults()
-    onSaved: { root.selfWrite = false; root.statusText = "Saved" }
-    onSaveFailed: { root.selfWrite = false; root.statusText = ""; root.errorText = "Could not write ~/.config/hypr/hyprripple.lua" }
+    onSaved: { root.selfWrite = false; root.statusKey = "saved" }
+    onSaveFailed: {
+      root.selfWrite = false
+      root.statusKey = ""
+      root.panelError = { code: "write", path: root.luaPath }
+    }
     // Adopt a hand edit, but never mid-drag.
     onFileChanged: {
       if (root.selfWrite || persistTimer.running) return
@@ -293,7 +326,7 @@ Item {
       height: Math.min(Style.space(600), window.height - Style.gapsOut * 4)
       radius: Style.cornerRadius
       color: root.background
-      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+      borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
       padding: Style.spacing.panelPadding
 
       MouseArea { anchors.fill: parent; onClicked: {} }
@@ -334,18 +367,19 @@ Item {
         spacing: Style.spacing.panelGap
 
         // Header
-        Item {
+        RowLayout {
           Layout.fillWidth: true
-          Layout.preferredHeight: Math.max(titleBlock.implicitHeight, actions.implicitHeight)
+          spacing: Style.spacing.lg
 
-          Column {
-            id: titleBlock
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
+          ColumnLayout {
+            Layout.fillWidth: true
             spacing: Style.spacing.xxs
 
             Text {
-              text: "HyprRipple"
+              Layout.fillWidth: true
+              textFormat: Text.PlainText
+              text: panelStrings.t("title")
+              wrapMode: Text.WrapAtWordBoundaryOrAnywhere
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.heading
@@ -353,22 +387,24 @@ Item {
             }
 
             Text {
+              Layout.fillWidth: true
+              textFormat: Text.PlainText
               text: root.pluginLoaded
-                ? "~/.config/hypr/hyprripple.lua · " + root.status.resolved_color
-                : "Native plugin not loaded. See README: hyprpm add, then hyprpm enable hyprripple"
-              color: root.pluginLoaded ? Qt.darker(root.foreground, 1.6) : Color.urgent
+                ? panelStrings.t("profile").arg(root.status.resolved_color || "—")
+                : panelStrings.t("pluginUnavailable")
+              wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+              color: root.pluginLoaded ? Qt.darker(root.foreground, 1.6) : Commons.Color.urgent
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
           }
 
           Row {
-            id: actions
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.alignment: Qt.AlignVCenter
             spacing: Style.spacing.lg
 
             Text {
+              textFormat: Text.PlainText
               text: root.statusText
               visible: text !== ""
               color: Qt.darker(root.foreground, 1.4)
@@ -378,9 +414,9 @@ Item {
             }
 
             Button {
-              text: "Test"
+              text: panelStrings.t("action.test")
               iconText: "󰐊"
-              tooltipText: "Ripple at the cursor (T)"
+              tooltipText: panelStrings.t("action.testHint")
               foreground: root.foreground
               accent: root.accent
               bordered: true
@@ -391,7 +427,7 @@ Item {
 
             PanelActionButton {
               iconText: "󰕌"
-              tooltipText: "Reset everything to defaults"
+              tooltipText: panelStrings.t("action.resetAll")
               foreground: root.foreground
               anchors.verticalCenter: parent.verticalCenter
               onClicked: root.resetAll()
@@ -399,7 +435,7 @@ Item {
 
             PanelActionButton {
               iconText: "󰅖"
-              tooltipText: "Close (Esc)"
+              tooltipText: panelStrings.t("action.close")
               foreground: root.foreground
               anchors.verticalCenter: parent.verticalCenter
               onClicked: root.dismiss()
@@ -408,7 +444,9 @@ Item {
         }
 
         ButtonGroup {
-          options: Model.SECTIONS
+          options: Model.SECTIONS.map(function(section) {
+            return { value: section, label: panelStrings.t("section." + section, section) }
+          })
           value: root.section
           foreground: root.foreground
           accent: root.accent
@@ -432,6 +470,7 @@ Item {
             required property int index
             width: ListView.view.width
             item: modelData
+            strings: panelStrings
             value: root.settings[modelData.key]
             foreground: root.foreground
             accent: root.accent
@@ -450,8 +489,9 @@ Item {
 
         Text {
           Layout.fillWidth: true
-          text: root.errorText !== "" ? root.errorText : "Tab: section · ↑↓/jk: row · ←→/hl: change · Enter: toggle · ⌫: reset row · T: test · Esc: close"
-          color: root.errorText !== "" ? Color.urgent : Qt.darker(root.foreground, 1.6)
+          textFormat: Text.PlainText
+          text: root.errorText !== "" ? root.errorText : panelStrings.t("keyboard")
+          color: root.errorText !== "" ? Commons.Color.urgent : Qt.darker(root.foreground, 1.6)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.WordWrap

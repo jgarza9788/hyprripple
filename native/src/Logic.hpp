@@ -21,7 +21,7 @@ namespace Logic {
         float       radius           = 140.f;     // logical px, click ripples
         std::string workspaceRadius  = "screen";  // "screen" or a number of logical px
         float       softness         = 2.0f;      // logical px
-        std::string style            = "classic"; // classic | ring | sparkle | negative | water | prism
+        std::string style            = "classic"; // classic | ring | sparkle | negative | water | water-short | prism
         float       ringWidth        = 6.0f;      // logical px, style = ring
         float       sparkleAmount    = 0.5f;      // 0..1, style = sparkle
         float       distortion       = 0.5f;      // 0..1, wave strength for water / prism
@@ -50,7 +50,7 @@ namespace Logic {
     std::optional<bool>  parseBool(std::string_view v);
     std::optional<float> parseFloat(std::string_view v);
 
-    // 0 classic, 1 ring, 2 sparkle, 3 negative, 4 water, 5 prism
+    // 0 classic, 1 ring, 2 sparkle, 3 negative, 4 water / water-short, 5 prism
     int styleMode(const std::string& style);
 
     inline constexpr int MODE_NEGATIVE = 3, MODE_WATER = 4, MODE_PRISM = 5;

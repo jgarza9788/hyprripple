@@ -15,17 +15,21 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/values/ConfigValues.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/protocols/LayerShell.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
@@ -234,11 +238,17 @@ namespace {
         PHLWINDOW           anchor;
         bool                held    = false;
         uint64_t            holdKey = 0;
+        bool                above   = false;
         bool                force   = false; // manual trigger: ignore exclusions
         // Manual previews: settings for this one ripple only (validated copy
         // of the live ones), so a preview never changes live settings.
         std::optional<SSettings> settings;
     };
+
+    bool effectsAllowed() {
+        static CConfigValue<Config::INTEGER> animationsEnabled("animations:enabled");
+        return *animationsEnabled && (!g_pSessionLockManager || !g_pSessionLockManager->isSessionLocked());
+    }
 
     // Shared gate for every automatic trigger.
     bool allowed(const Vector2D& at, const PHLWINDOW& window) {
@@ -260,12 +270,13 @@ namespace {
     SRipple* spawn(const SSpawn& sp) {
         if (!g_state)
             return nullptr;
-        if (!sp.force && !allowed(sp.center, sp.anchor)) {
+        if (!effectsAllowed() || (!sp.force && !allowed(sp.center, sp.anchor))) {
             g_state->nSkipped++;
             return nullptr;
         }
 
         const auto& s = sp.settings ? *sp.settings : g_state->settings;
+        const auto  mode = Logic::styleMode(s.style);
         SRipple     r{
                 .center        = sp.center,
                 .maxRadius     = std::clamp(sp.radius, 4.f, 20000.f),
@@ -273,14 +284,15 @@ namespace {
                 .duration      = s.duration / 1000.f,
                 .opacity       = s.opacity,
                 .color         = Theme::resolve(s.color),
-                .mode          = Logic::styleMode(s.style),
+                .mode          = mode,
                 .seed          = std::uniform_real_distribution<float>(0.f, 137.f)(g_state->rng),
                 .ringWidth     = s.ringWidth,
                 .sparkleAmount = s.sparkleAmount,
                 .distortion    = s.distortion,
                 .softness      = s.softness,
+                .above         = sp.above,
                 // waves travel and fade on their own: hold doesn't apply
-                .held          = sp.held && s.hold && !Logic::isWaveMode(Logic::styleMode(s.style)),
+                .held          = sp.held && s.hold && !Logic::isWaveMode(mode),
                 .holdKey       = sp.holdKey,
         };
         if (sp.clip) {
@@ -309,8 +321,18 @@ namespace {
                 r.released = now;
     }
 
-    // Drop finished ripples, wiping where they were drawn.
+    void clearRipples() {
+        for (const auto& r : g_state->ripples)
+            g_pHyprRenderer->damageBox(r.lastBounds.value_or(r.bounds()));
+        g_state->ripples.clear();
+    }
+
+    // Drop finished or suppressed ripples, wiping where they were drawn.
     void prune(steady_clock::time_point now) {
+        if (!effectsAllowed()) {
+            clearRipples();
+            return;
+        }
         std::erase_if(g_state->ripples, [&](SRipple& r) {
             if (!Logic::finished(r.life(now)))
                 return false;
@@ -373,6 +395,8 @@ namespace {
         const auto stage = ev.stage;
         if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty())
             return;
+        if (!effectsAllowed())
+            return;
         const auto mon = ev.monitor;
         if (!mon)
             return;
@@ -418,18 +442,21 @@ namespace {
         return w && w->mapped() && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
     }
 
-    // A bar, launcher or other top/overlay layer surface under the point.
-    PHLLS layerAt(const Vector2D& p) {
+    // Match Hyprland's input hit test so pass-through regions reach the window below.
+    std::optional<CBox> layerBoxAt(const Vector2D& p) {
         const auto mon = monitorAt(p);
         if (!mon)
-            return nullptr;
-        for (int layer = 3; layer >= 2; --layer) // overlay, then top
-            for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
-                const auto ls = ref.lock();
-                if (ls && ls->mapped() && ls->m_geometry.containsPoint(p))
-                    return ls;
-            }
-        return nullptr;
+            return std::nullopt;
+        const auto hit = Desktop::viewState()->hitTest();
+        Vector2D   local;
+        PHLLS      layer;
+        if (const auto popup = hit.layerPopupSurfaceAt(p, mon, &local, &layer))
+            return CBox{p - local, popup->m_current.size};
+        for (const auto index : {ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, ZWLR_LAYER_SHELL_V1_LAYER_TOP}) {
+            if (hit.layerSurfaceAt(p, &mon->m_layerSurfaceLayers[index], &local, &layer))
+                return layer->m_geometry;
+        }
+        return std::nullopt;
     }
 
     // Bound a ripple to its window (Material's bounded ripple) when "Clip to
@@ -446,15 +473,9 @@ namespace {
     // rides on - and is clipped to - the window under the point. On a bar or
     // launcher it's drawn above layers and clipped to that surface instead.
     void spawnPress(const Vector2D& at, uint64_t holdKey) {
-        if (const auto ls = layerAt(at)) {
-            if (auto* r = spawn({.center = at, .radius = g_state->settings.radius, .held = true, .holdKey = holdKey})) {
-                r->above = true;
-                if (g_state->settings.bounded) {
-                    r->clip    = true;
-                    r->clipBox = ls->m_geometry;
-                }
-                damage(*r);
-            }
+        if (const auto layer = layerBoxAt(at)) {
+            spawn({.center = at, .radius = g_state->settings.radius, .clip = g_state->settings.bounded ? layer : std::nullopt,
+                   .held = true, .holdKey = holdKey, .above = true});
             return;
         }
         const auto w = windowAtPoint(at);
@@ -522,7 +543,7 @@ namespace {
         // the window is excluded.
         if (reason == Desktop::FOCUS_REASON_CLICK && !g_state->ripples.empty()) {
             auto& last = g_state->ripples.back();
-            if (steady_clock::now() - last.start < milliseconds(300) && last.anchor.lock() != window && liveBox(window).containsPoint(last.center)) {
+            if (!last.above && steady_clock::now() - last.start < milliseconds(300) && last.anchor.lock() != window && liveBox(window).containsPoint(last.center)) {
                 if (excluded(window)) {
                     g_pHyprRenderer->damageBox(last.lastBounds.value_or(last.bounds()));
                     g_state->ripples.pop_back();
@@ -609,9 +630,8 @@ namespace {
         // Caller-supplied numbers: keep them in a sane layout range.
         if (at)
             at = Vector2D{std::clamp(at->x, -1e5, 1e5), std::clamp(at->y, -1e5, 1e5)};
-        if (auto* r = spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .force = true, .settings = preview});
-            r && above)
-            r->above = true;
+        spawn({.center = at.value_or(g_pInputManager->getMouseCoordsInternal()), .radius = radius.value_or(g_state->settings.radius), .above = above,
+               .force = true, .settings = preview});
         return true;
     }
 
@@ -800,7 +820,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     c.radius           = addValue<CV::Float>("plugin:hyprripple:radius", "Click ripple radius (logical px)", Config::FLOAT{d.radius});
     c.workspaceRadius  = addValue<CV::String>("plugin:hyprripple:workspace_radius", "'screen' or px", Config::STRING{d.workspaceRadius});
     c.softness         = addValue<CV::Float>("plugin:hyprripple:softness", "Edge feather (logical px)", Config::FLOAT{d.softness});
-    c.style            = addValue<CV::String>("plugin:hyprripple:style", "classic | ring | sparkle | negative | water | prism", Config::STRING{d.style});
+    c.style            = addValue<CV::String>("plugin:hyprripple:style", "classic | ring | sparkle | negative | water | water-short | prism", Config::STRING{d.style});
     c.ringWidth        = addValue<CV::Float>("plugin:hyprripple:ring_width", "Ring thickness (logical px)", Config::FLOAT{d.ringWidth});
     c.sparkleAmount    = addValue<CV::Float>("plugin:hyprripple:sparkle_amount", "Sparkle density 0-1", Config::FLOAT{d.sparkleAmount});
     c.distortion       = addValue<CV::Float>("plugin:hyprripple:distortion", "Water / prism wave strength 0-1", Config::FLOAT{d.distortion});
@@ -865,6 +885,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }));
     g_state->listeners.push_back(ev.render.pre.listen([](PHLMONITOR mon) { onPreRender(mon); }));
     g_state->listeners.push_back(ev.render.stage.listen([](const Event::SRenderStageEvent& e) { onRenderStage(e); }));
+    if (g_pSessionLockManager)
+        g_state->listeners.push_back(g_pSessionLockManager->m_events.lock.listen(clearRipples));
     g_state->listeners.push_back(ev.config.reloaded.listen([]() {
         if (g_state)
             loadFromConfig();
@@ -894,8 +916,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_state->ctl)
         HyprlandAPI::unregisterHyprCtlCommand(PHANDLE, g_state->ctl);
 
-    for (const auto& r : g_state->ripples)
-        g_pHyprRenderer->damageBox(r.lastBounds.value_or(r.bounds()));
+    clearRipples();
 
     RippleShader::destroy();
     g_state.reset();

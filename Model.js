@@ -42,6 +42,7 @@ var SCHEMA = [
       { value: "sparkle", label: "Sparkle" },
       { value: "negative", label: "Negative" },
       { value: "water", label: "Water" },
+      { value: "water-short", label: "Water (Short)" },
       { value: "prism", label: "Prism" }
     ], fallback: "classic" },
   { section: "Look", key: "opacity", type: "float", label: "Opacity",
@@ -58,7 +59,7 @@ var SCHEMA = [
     min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: "sparkle" },
   { section: "Look", key: "distortion", type: "float", label: "Distortion",
     description: "How hard the wave bends what's under it.",
-    min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: ["water", "prism"] },
+    min: 0, max: 1, step: 0.05, decimals: 2, fallback: 0.5, needs: "style", needsValue: ["water", "water-short", "prism"] },
   { section: "Look", key: "ring_width", type: "int", label: "Ring width",
     description: "Thickness of the ring style.", unit: "px",
     min: 1, max: 60, step: 1, fallback: 6, needs: "style", needsValue: "ring" },
@@ -75,7 +76,7 @@ var SCHEMA = [
       { value: "center", label: "Center" }
     ], fallback: "cursor" },
   { section: "Motion", key: "bounded", type: "bool", label: "Clip to window",
-    description: "Keep click, tap and focus ripples inside their window, like Material's bounded ripple. Clicks on the desktop or bar stay unclipped.", fallback: true },
+    description: "Keep click, tap and focus ripples inside their window, bar or launcher. Clicks on the desktop stay unclipped.", fallback: true },
   { section: "Motion", key: "workspace_radius", type: "string", label: "Workspace radius",
     description: "'screen' floods the monitor; a number is a fixed radius in px.", fallback: "screen" },
   { section: "Motion", key: "max_ripples", type: "int", label: "Max ripples",
@@ -102,8 +103,9 @@ var PRESETS = {
   ring:    { opacity: 0.5, radius: 140, softness: 1.5, ring_width: 6, duration: 600 },
   sparkle: { opacity: 0.2, radius: 140, softness: 2, duration: 800 },
   negative: { opacity: 1, radius: 140, softness: 2, duration: 600 },
-  water:    { opacity: 0.9, radius: 220, softness: 2, duration: 1100 },
-  prism:    { opacity: 0.9, radius: 240, softness: 2, duration: 900 }
+  water:    { opacity: 0.9, radius: 220, softness: 2, duration: 1100, distortion: 0.5 },
+  "water-short": { opacity: 0.65, radius: 80, softness: 2, duration: 250, distortion: 0.3 },
+  prism:    { opacity: 0.9, radius: 240, softness: 2, duration: 900, distortion: 0.5 }
 }
 
 // Values each preset remembers on its own: tweak sparkle's opacity, switch to
@@ -111,30 +113,35 @@ var PRESETS = {
 // return to the current preset's default rather than the global one.
 var PRESET_KEYS = ["opacity", "radius", "softness"]
 
-function isPresetKey(key) {
-  return PRESET_KEYS.indexOf(key) !== -1
+function presetKeys(style) {
+  return ["water", "water-short", "prism"].indexOf(style) !== -1
+    ? PRESET_KEYS.concat(["distortion"]) : PRESET_KEYS
+}
+
+function isPresetKey(key, style) {
+  return presetKeys(style).indexOf(key) !== -1
 }
 
 // What a row's reset button restores, given the current settings.
 function defaultFor(key, settings) {
   var item = itemFor(key)
   if (!item) return undefined
-  if (isPresetKey(key) && settings) {
+  if (settings && isPresetKey(key, settings.style)) {
     var preset = PRESETS[settings.style]
     if (preset && preset[key] !== undefined) return preset[key]
   }
   return item.fallback
 }
 
-// Record the current preset's remembered values into `memory`
-// ({ style: { opacity, radius, softness } }); returns a new object.
+// Record the current preset's remembered values into `memory`.
 function rememberPreset(memory, settings) {
   var out = cleanMemory(memory)
   if (!settings || !PRESETS[settings.style]) return out
   var slot = {}
-  for (var i = 0; i < PRESET_KEYS.length; i++) {
-    var c = coerce(PRESET_KEYS[i], settings[PRESET_KEYS[i]])
-    if (c.ok) slot[PRESET_KEYS[i]] = c.value
+  var keys = presetKeys(settings.style)
+  for (var i = 0; i < keys.length; i++) {
+    var c = coerce(keys[i], settings[keys[i]])
+    if (c.ok) slot[keys[i]] = c.value
   }
   out[settings.style] = slot
   return out
@@ -148,8 +155,7 @@ function switchPreset(settings, memory, style) {
   var next = applyPreset(settings, style)
   var saved = mem[style]
   if (saved)
-    for (var i = 0; i < PRESET_KEYS.length; i++)
-      if (saved[PRESET_KEYS[i]] !== undefined) next[PRESET_KEYS[i]] = saved[PRESET_KEYS[i]]
+    for (var key in saved) next[key] = saved[key]
   return { settings: next, memory: mem }
 }
 
@@ -163,8 +169,9 @@ function cleanMemory(memory) {
     var slot = memory[style]
     if (!slot || typeof slot !== "object") continue
     var clean = {}
-    for (var i = 0; i < PRESET_KEYS.length; i++) {
-      var key = PRESET_KEYS[i]
+    var keys = presetKeys(style)
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
       if (!Object.prototype.hasOwnProperty.call(slot, key)) continue
       var c = coerce(key, slot[key])
       if (c.ok) clean[key] = c.value
@@ -184,7 +191,7 @@ function parseStyleEvent(data) {
 
 // The service's half of a style change made anywhere (panel, hyprctl, Lua):
 // the plugin already switched `style` but still holds the old preset's
-// opacity/radius/softness, so `live` (its `hyprctl hyprripple get`) is
+// visual settings, so `live` (its `hyprctl hyprripple get`) is
 // exactly what to remember for `from`.
 function switchFromLive(live, from, to, memory) {
   var settings = normalize(live)
@@ -255,20 +262,20 @@ var KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
 // a Lua string or chain another command in `hyprctl --batch`.
 var EXCLUDE_RE = /^[A-Za-z0-9._\-*?, ]{0,512}$/
 
-// Validate/normalise one value. Returns { ok, value } or { ok: false, error }.
+// Validate/normalise one value. Returns { ok, value } or { ok: false, errorCode, error }.
 function coerce(key, raw) {
   var item = itemFor(key)
-  if (!item) return { ok: false, error: "unknown setting " + key }
+  if (!item) return { ok: false, errorCode: "unknownSetting", error: "unknown setting " + key }
 
   if (item.type === "bool") {
     if (raw === true || raw === "true" || raw === 1 || raw === "1") return { ok: true, value: true }
     if (raw === false || raw === "false" || raw === 0 || raw === "0") return { ok: true, value: false }
-    return { ok: false, error: key + " must be true or false" }
+    return { ok: false, errorCode: "invalidBool", error: key + " must be true or false" }
   }
 
   if (item.type === "int" || item.type === "float") {
     var n = Number(raw)
-    if (raw === "" || raw === null || !isFinite(n)) return { ok: false, error: key + " must be a number" }
+    if (raw === "" || raw === null || !isFinite(n)) return { ok: false, errorCode: "invalidNumber", error: key + " must be a number" }
     n = Math.max(item.min, Math.min(item.max, n))
     if (item.type === "int") n = Math.round(n)
     else n = parseFloat(n.toFixed(item.decimals === undefined ? 2 : item.decimals))
@@ -279,7 +286,7 @@ function coerce(key, raw) {
     if (key === "style" && raw === "fill") raw = "classic" // pre-preset name
     for (var i = 0; i < item.options.length; i++)
       if (item.options[i].value === raw) return { ok: true, value: raw }
-    return { ok: false, error: key + " must be one of " + item.options.map(function(o) { return o.value }).join(", ") }
+    return { ok: false, errorCode: "invalidEnum", error: key + " must be one of " + item.options.map(function(o) { return o.value }).join(", ") }
   }
 
   var s = String(raw === undefined || raw === null ? "" : raw).trim()
@@ -287,22 +294,22 @@ function coerce(key, raw) {
   if (item.type === "color") {
     if (s === "") return { ok: true, value: "accent" }
     if (HEX_RE.test(s) || KEY_RE.test(s)) return { ok: true, value: s }
-    return { ok: false, error: "color must be a theme color name or #rrggbb" }
+    return { ok: false, errorCode: "invalidColor", error: "color must be a theme color name or #rrggbb" }
   }
 
   if (key === "workspace_radius") {
     if (s === "" || s === "screen") return { ok: true, value: "screen" }
     var r = Number(s)
     if (isFinite(r) && r > 0) return { ok: true, value: String(Math.round(Math.max(10, Math.min(20000, r)))) }
-    return { ok: false, error: "workspace_radius must be 'screen' or a number" }
+    return { ok: false, errorCode: "invalidRadius", error: "workspace_radius must be 'screen' or a number" }
   }
 
   if (key === "exclude") {
     if (EXCLUDE_RE.test(s)) return { ok: true, value: s }
-    return { ok: false, error: "excluded apps: only letters, digits, . _ - * ? and commas" }
+    return { ok: false, errorCode: "invalidExclude", error: "excluded apps: only letters, digits, . _ - * ? and commas" }
   }
 
-  return { ok: false, error: "unsupported setting " + key }
+  return { ok: false, errorCode: "unsupportedSetting", error: "unsupported setting " + key }
 }
 
 // Fill gaps with defaults and drop anything invalid.
