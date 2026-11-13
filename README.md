@@ -1,4 +1,4 @@
-# HyprRipple
+# HyprRipple — Water Click Ripples
 
 Material Design ink ripples for Hyprland, drawn by the compositor itself in
 your Omarchy theme's accent colour. Click, tap, change focus or switch
@@ -6,7 +6,7 @@ workspace and the screen answers with a ripple. It can be a classic splash, a
 Material 3 sparkle, or an effect on the screen itself: inverted, refracted
 like water, or bent through a rainbow lens.
 
-![HyprRipple presets](preview.png)
+![A strong Water ripple refracts terminal text on an Omarchy desktop](preview.png)
 
 ## Install
 
@@ -39,7 +39,7 @@ Every file it edits is backed up first (`<file>.bak.hyprripple.<time>`), and
 its edits are fenced with `>>> hyprripple >>>` comments.
 `./install --dry-run` shows what it would do without changing anything.
 
-**Requirements:** Hyprland 0.56+ with the Lua config, plus `hyprpm`, `git`,
+**Requirements for this branch:** Hyprland 0.57 with the Lua config, plus `hyprpm`, `git`,
 `make`, `g++`, `pkg-config` and `python3`. Omarchy is optional: without it
 you get the ripples and Lua settings but not the panel, menu entries or
 theme colours (the colour falls back to blue).
@@ -86,7 +86,8 @@ then checks that no trace is left and tells you so.
 
 Open the settings from the Omarchy menu (search **ripple**), or with
 `omarchy-shell shell toggle jgarza.hyprripple`. Everything changes live. The
-panel has four sections:
+panel follows Omarchy Shell's language and supports English and Russian. It has
+four sections:
 
 - **Triggers:** mouse clicks (left or any button), touch & pen, window focus,
   hover focus, workspace switch
@@ -120,12 +121,32 @@ reset button.
 | **Sparkle** | Material 3 / Android 12: a soft glow with shimmering grain that trails the wave |
 | **Negative** | inverts the screen under the disc |
 | **Water** | one smooth swell that refracts the screen like a lens of water |
+| **Water (Short)** | the same refraction in a compact 80 px wave with a 250 ms duration |
 | **Prism** | a glass lens band that splits red/green/blue, with a turning rainbow |
 
-Each preset remembers its own **opacity, radius and edge softness**: tweak
-Sparkle, switch to Classic and back, and your Sparkle values return. For
-Negative, Water and Prism, *opacity* is the effect's strength. Water and
-Prism are travelling waves: their bend eases to zero before they fade.
+Each preset remembers its own **opacity, radius and edge softness**. Water
+and Prism presets also remember their own **distortion**. For Negative, both
+Water presets and Prism, *opacity* is the effect's strength. The Water and
+Prism waves ease back to a flat image before they fade.
+
+For the click-only setup shown below, select **Water (Short)**, set **Mouse
+clicks** to **Left**, and turn off **Touch & pen**, **Window focus**,
+**Workspace switch** and **Grow while held**. Set **Max ripples** to **2**
+to match the demo. Selecting a preset updates the wave's shape and timing and
+keeps your trigger preferences.
+
+В русской панели выберите **Короткая волна**, для **Клики мышью** укажите
+**Левая**. Выключите **Касание и перо**, **Фокус окна**, **Смена рабочего
+пространства** и **Рост при удержании**. Для **Максимум волн** укажите **2**.
+
+![Three left clicks with the short Water preset](docs/water-short.gif)
+
+The desktop capture compares a **strong Water splash** (205 px, 450 ms,
+maximum distortion) with **Water (Short)** (80 px, 250 ms), first over
+terminal text and then over the desktop wallpaper. It was recorded in a
+live Omarchy session with the [Everforest background](https://github.com/omacom/omarchy/blob/v4.5.0/themes/everforest/backgrounds/1-tree-tops.webp).
+
+![Strong Water and Water (Short) on an Omarchy desktop](docs/water-click-desktop.gif)
 
 ### How ripples behave
 
@@ -136,14 +157,15 @@ Prism are travelling waves: their bend eases to zero before they fade.
   corners included, and moves with it: drags, resizes, scrolling layouts and
   workspace slides.
 - **Bars and launchers:** pressing Waybar or the Omarchy menu ripples on top
-  of it, clipped to it.
+  of it, clipped to it. Click-through areas show the ripple on the window below.
 - **Focus:** keyboard focus, new windows and closed windows fill the focused
   window from the cursor. Hover focus (`follow_mouse`) is off by default; when
   on, it starts at the edge the mouse came in from.
 - **Workspace switch:** a wave floods the monitor from the cursor.
 - **Theme colours** follow theme switches instantly.
 - **Animation** runs at each monitor's own refresh rate, and costs nothing
-  when no ripple is on screen.
+  when no ripple is on screen. Ripples pause when the session is locked or
+  Hyprland animations are disabled.
 
 ## Settings reference
 
@@ -160,7 +182,7 @@ and hand edits apply live.
 | `focus_hover` | `false` | also on focus-follows-mouse |
 | `on_workspace` | `true` | ripple on workspace switch |
 | `color` | `"accent"` | any `colors.toml` key (`accent`, `foreground`, `color4`…) or `#rrggbb[aa]` |
-| `style` | `"classic"` | `classic` `ring` `sparkle` `negative` `water` `prism` |
+| `style` | `"classic"` | `classic` `ring` `sparkle` `negative` `water` `water-short` `prism` |
 | `opacity` | `0.28` | peak opacity (effect strength for negative/water/prism) |
 | `radius` | `140` | click ripple radius, logical px |
 | `softness` | `2` | edge feather, px |

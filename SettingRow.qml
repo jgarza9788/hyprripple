@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One setting: label + description on the left, its control on the right.
@@ -9,9 +10,10 @@ Item {
   id: root
 
   required property var item
+  required property Commons.Translations strings
   property var value
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property color swatch: "transparent"   // resolved ink color, color rows only
   property string fontFamily: Style.font.family
   property bool hasCursor: false            // keyboard cursor is on this row
@@ -33,6 +35,9 @@ Item {
   // per-preset values.
   property var defaultValue: item.fallback
   readonly property bool modified: String(value) !== String(defaultValue)
+  readonly property var options: (item.options || []).map(function(option) {
+    return { value: option.value, label: root.strings.t("setting." + root.item.key + ".option." + option.value, option.label) }
+  })
 
   readonly property bool isBool: item.type === "bool"
   readonly property bool isEnum: item.type === "enum"
@@ -51,8 +56,17 @@ Item {
   function formatted() {
     var n = Number(value)
     if (!isFinite(n)) return "-"
-    var t = item.type === "int" ? String(Math.round(n)) : n.toFixed(item.decimals === undefined ? 2 : item.decimals)
-    return t + (item.unit || "")
+    var decimals = item.type === "int" ? 0 : (item.decimals === undefined ? 2 : item.decimals)
+    return Commons.I18n.formatNumber(n, decimals) + (item.unit || "")
+  }
+
+  function formattedDefault() {
+    if (root.isBool) return root.strings.t(root.defaultValue ? "value.on" : "value.off")
+    if (typeof root.defaultValue === "number") return Commons.I18n.formatNumber(root.defaultValue) + (root.item.unit || "")
+    if (root.defaultValue === "") return root.strings.t("value.empty")
+    if (root.item.key === "workspace_radius" && root.defaultValue === "screen") return root.strings.t("value.screen")
+    var option = root.options.find(function(o) { return o.value === root.defaultValue })
+    return option ? option.label : String(root.defaultValue)
   }
 
   implicitHeight: Math.max(labels.implicitHeight, control.implicitHeight) + Style.spacing.xl
@@ -85,7 +99,10 @@ Item {
       spacing: Style.spacing.sm
 
       Text {
-        text: root.item.label
+        textFormat: Text.PlainText
+        text: root.strings.t("setting." + root.item.key + ".label", root.item.label)
+        width: Math.min(implicitWidth, Math.max(0, labels.width - Style.spacing.sm - Style.space(5)))
+        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.subtitle
@@ -105,7 +122,8 @@ Item {
     }
 
     Text {
-      text: root.item.description || ""
+      textFormat: Text.PlainText
+      text: root.strings.t("setting." + root.item.key + ".description", root.item.description || "")
       visible: text !== ""
       width: parent.width
       wrapMode: Text.WordWrap
@@ -121,14 +139,24 @@ Item {
       height: Style.spacing.sm
     }
 
-    ButtonGroup {
+    Flow {
       visible: root.wideEnum
-      options: root.wideEnum ? root.item.options : []
-      value: String(root.value)
-      foreground: root.foreground
-      accent: root.accent
-      focusable: false
-      onChanged: function(v) { root.committed(v) }
+      width: labels.width
+      spacing: Style.spacing.md
+
+      Repeater {
+        model: root.wideEnum ? root.options : []
+
+        Button {
+          required property var modelData
+          text: modelData.label
+          selected: modelData.value === root.value
+          bordered: true
+          foreground: root.foreground
+          accent: root.accent
+          onClicked: root.committed(modelData.value)
+        }
+      }
     }
   }
 
@@ -151,7 +179,7 @@ Item {
       PanelActionButton {
         id: resetButton
         iconText: "󰕌"
-        tooltipText: "Reset to default (" + String(root.defaultValue) + ")"
+        tooltipText: root.strings.t("action.resetValue").arg(root.formattedDefault())
         foreground: root.foreground
         opacity: root.modified ? 1 : 0
         enabled: root.modified
@@ -171,6 +199,7 @@ Item {
 
     Text {
       visible: root.isSlider
+      textFormat: Text.PlainText
       text: root.formatted()
       width: Style.space(56)
       horizontalAlignment: Text.AlignRight
@@ -197,7 +226,7 @@ Item {
 
     ButtonGroup {
       visible: root.isEnum && !root.wideEnum
-      options: root.isEnum ? root.item.options : []
+      options: root.isEnum && !root.wideEnum ? root.options : []
       value: String(root.value)
       foreground: root.foreground
       accent: root.accent
@@ -230,7 +259,7 @@ Item {
           id: colorField
           width: Style.space(130)
           text: root.isPresetColor ? "" : String(root.value)
-          placeholderText: "#rrggbb"
+          placeholderText: root.strings.t("setting.color.placeholder")
           foreground: root.foreground
           accent: root.accent
           onAccepted: { root.committed(text); root.doneEditing() }
@@ -240,7 +269,7 @@ Item {
       }
 
       ButtonGroup {
-        options: root.isColor ? root.item.options : []
+        options: root.isColor ? root.options : []
         value: root.isPresetColor ? String(root.value) : ""
         foreground: root.foreground
         accent: root.accent
@@ -254,7 +283,7 @@ Item {
       visible: root.isText
       width: root.item.type === "text" ? Style.space(220) : Style.space(130)
       text: root.isText ? String(root.value) : ""
-      placeholderText: root.item.placeholder || ""
+      placeholderText: root.strings.t("setting." + root.item.key + ".placeholder", root.item.placeholder || "")
       foreground: root.foreground
       accent: root.accent
       anchors.verticalCenter: parent.verticalCenter

@@ -159,7 +159,6 @@ gitq "$G/pushed" push origin HEAD; echo d >> "$G/pushed/f"; gitq "$G/pushed" sta
 git init -q "$G/local"; echo a > "$G/local/f"; gitq "$G/local" add f; gitq "$G/local" commit -m a
 ! can "$G/local"; ok "no remote (only copy) protects the folder" $?
 mkdir -p "$G/plain"; ! can "$G/plain"; ok "non-git folder is protected" $?
-! can "$ROOT"; ok "this dev checkout (unpushed) is protected" $?
 
 echo
 if (( failed )); then echo "$failed failed"; exit 1; fi

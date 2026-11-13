@@ -106,6 +106,8 @@ int main() {
         Settings s;
         ok("negative style", applySetting(s, "style", "negative").empty() && styleMode(s.style) == MODE_NEGATIVE);
         ok("water style", applySetting(s, "style", "water").empty() && styleMode(s.style) == MODE_WATER);
+        ok("water-short keeps its own name and renders as water",
+           applySetting(s, "style", "water-short").empty() && s.style == "water-short" && styleMode(s.style) == MODE_WATER);
         ok("prism style", applySetting(s, "style", "prism").empty() && styleMode(s.style) == MODE_PRISM);
         ok("distortion clamps", applySetting(s, "distortion", "9").empty() && s.distortion == 1.f);
         ok("distortion rejects text", !applySetting(s, "distortion", "lots").empty());

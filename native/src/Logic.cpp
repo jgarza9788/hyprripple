@@ -32,18 +32,24 @@ namespace Logic {
         return f;
     }
 
-    int styleMode(const std::string& style) {
+    static std::optional<int> findStyleMode(std::string_view style) {
+        if (style == "classic")
+            return 0;
         if (style == "ring")
             return 1;
         if (style == "sparkle")
             return 2;
         if (style == "negative")
             return MODE_NEGATIVE;
-        if (style == "water")
+        if (style == "water" || style == "water-short")
             return MODE_WATER;
         if (style == "prism")
             return MODE_PRISM;
-        return 0;
+        return std::nullopt;
+    }
+
+    int styleMode(const std::string& style) {
+        return findStyleMode(style).value_or(0);
     }
 
     bool isSamplingMode(int mode) {
@@ -156,7 +162,10 @@ namespace Logic {
                 s.style = "classic";
                 return "";
             }
-            return asEnum(s.style, {"classic", "ring", "sparkle", "negative", "water", "prism"});
+            if (!findStyleMode(value))
+                return std::format("{}: unknown value", key);
+            s.style = value;
+            return "";
         }
         if (key == "focus_origin")
             return asEnum(s.focusOrigin, {"cursor", "center"});

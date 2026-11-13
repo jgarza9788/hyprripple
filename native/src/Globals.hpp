@@ -16,7 +16,7 @@
 inline constexpr std::string_view PLUGIN_NAME        = "hyprripple";
 inline constexpr std::string_view PLUGIN_DESCRIPTION = "Material Design ink ripple in your theme's accent color";
 inline constexpr std::string_view PLUGIN_AUTHOR      = "jgarza";
-inline constexpr std::string_view PLUGIN_VERSION     = "0.2.0";
+inline constexpr std::string_view PLUGIN_VERSION     = "0.3.0";
 
 inline HANDLE PHANDLE = nullptr;
 

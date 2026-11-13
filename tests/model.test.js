@@ -155,17 +155,30 @@ for (const bad of ["", "classic", "classic,nope", "x,ring", "ring,ring", "a,b,c"
 }
 
 // screen-effect presets
-for (const st of ["negative", "water", "prism"]) {
+for (const st of ["negative", "water", "water-short", "prism"]) {
   ok(st + " accepted", M.coerce("style", st).value === st);
   const a = M.applyPreset(M.defaults(), st);
   ok(st + " preset defaults", a.style === st && a.opacity === M.PRESETS[st].opacity && a.duration === M.PRESETS[st].duration);
   ok(st + " style event", M.parseStyleEvent("classic," + st) !== null);
 }
 ok("distortion row for water", M.rowsFor("Look", { style: "water" }).some((i) => i.key === "distortion"));
+ok("distortion row for short water", M.rowsFor("Look", { style: "water-short" }).some((i) => i.key === "distortion"));
 ok("distortion row for prism", M.rowsFor("Look", { style: "prism" }).some((i) => i.key === "distortion"));
 ok("no distortion row for negative", !M.rowsFor("Look", { style: "negative" }).some((i) => i.key === "distortion"));
 ok("distortion clamps", M.coerce("distortion", 5).value === 1);
 ok("defaultFor negative opacity", M.defaultFor("opacity", { style: "negative" }) === 1);
+{
+  const water = Object.assign(M.applyPreset(M.defaults(), "water"), { radius: 192, distortion: 0.75, on_click: "any" });
+  const short = M.switchPreset(water, {}, "water-short");
+  ok("short Water uses a compact radius and duration", short.settings.radius === 80 && short.settings.duration === 250);
+  ok("short Water keeps the user's trigger selection", short.settings.on_click === "any");
+  ok("short Water survives a Lua round trip", M.parseLua(M.renderLua(short.settings)).style === "water-short");
+  const back = M.switchPreset(Object.assign({}, short.settings, { radius: 95, distortion: 0.4 }), short.memory, "water");
+  const again = M.switchPreset(back.settings, back.memory, "water-short");
+  ok("water profiles keep separate radius memory", back.settings.radius === 192 && again.settings.radius === 95);
+  ok("water profiles keep separate distortion memory", back.settings.distortion === 0.75 && again.settings.distortion === 0.4);
+  ok("short Water distortion resets to its own default", M.defaultFor("distortion", again.settings) === 0.3);
+}
 {
   let st = Object.assign(M.applyPreset(M.defaults(), "negative"), { opacity: 0.7 });
   let r = M.switchPreset(st, {}, "water");
