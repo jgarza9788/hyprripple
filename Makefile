@@ -6,6 +6,10 @@ SHELL       := /bin/bash
 
 CXX      ?= g++
 CXXFLAGS  = -fPIC -g -O2 -std=c++23 -Wall -Wno-deprecated-declarations
+
+# Hyprland minor version (0.56 -> 56) selects the API in native/src/hlcompat.hpp
+HL_VERSION_MINOR := $(shell pkg-config --modversion hyprland | cut -d. -f2)
+CXXFLAGS += -DHL_VERSION_MINOR=$(HL_VERSION_MINOR)
 LDFLAGS   = -shared
 INCLUDES  = $(shell pkg-config --cflags hyprland pixman-1 libdrm) -Inative/build
 LIBS      = $(shell pkg-config --libs hyprland)

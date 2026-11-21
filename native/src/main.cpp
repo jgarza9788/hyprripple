@@ -12,14 +12,12 @@
 #include "Globals.hpp"
 #include "RipplePassElement.hpp"
 #include "Theme.hpp"
+#include "hlcompat.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/values/ConfigValues.hpp>
-#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/desktop/view/window/Window.hpp>
-#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
@@ -32,8 +30,6 @@
 #include <hyprland/src/desktop/state/ViewHitTester.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
-#include <hyprland/src/render/WindowRenderPresentation.hpp>
-#include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprutils/signal/Listener.hpp>
 
 extern "C" {
@@ -90,7 +86,7 @@ namespace {
         std::deque<SRipple>                                 ripples;
         std::vector<Hyprutils::Signal::CHyprSignalListener> listeners;
         SP<CEventLoopTimer>                                 sweep;
-        SP<IPC::Socket1::SCommand>                         ctl;
+        hlc::CtlCommand                                     ctl;
         steady_clock::time_point                            lastClick{}, lastWorkspace{};
         // Active screenshares by name, from screenshare start/stop events.
         // (Hyprland's own screenshare manager isn't safely reachable from a
@@ -128,9 +124,9 @@ namespace {
     // the workspace slide offset (same as the renderer applies).
     CBox liveBox(const PHLWINDOW& w) {
         CBox box = w->getWindowMainSurfaceBox();
-        if (w->m_workspace && !(w->m_state & Desktop::View::WINDOW_STATE_PINNED))
+        if (w->m_workspace && !hlc::pinned(w))
             box.translate(w->m_workspace->m_renderOffset->value());
-        box.translate(w->presentation().floatingOffset());
+        box.translate(hlc::floatingOffset(w));
         return box;
     }
 
@@ -143,7 +139,7 @@ namespace {
 
     bool excluded(const PHLWINDOW& w) {
         const auto& list = g_state->settings.exclude;
-        return w && !list.empty() && Logic::classExcluded(list, w->metadata().appID());
+        return w && !list.empty() && Logic::classExcluded(list, hlc::appID(w));
     }
 
     // ── settings ─────────────────────────────────────────────────────────────
@@ -213,7 +209,7 @@ namespace {
     // Move an anchored ripple with its window.
     void follow(SRipple& r) {
         const auto w = r.anchor.lock();
-        if (!w || !w->mapped())
+        if (!w || !hlc::mapped(w))
             return;
         const CBox box = liveBox(w);
         r.center       = box.pos() + r.anchorRel;
@@ -370,7 +366,7 @@ namespace {
     }
 
     // Queue one ripple into a render pass at this frame's size / alpha.
-    void addRipple(Render::CRenderContext& ctx, const SRipple& r, steady_clock::time_point now, float alphaMul = 1.f) {
+    void addRipple(hlc::Ctx& ctx, const SRipple& r, steady_clock::time_point now, float alphaMul = 1.f) {
         const auto life = r.life(now);
         ctx.m_pass.add(makeUnique<CRipplePassElement>(CRipplePassElement::SData{
             .ripple = r,
@@ -389,7 +385,7 @@ namespace {
     // instead of every ripple being painted over all windows at the end.
     class CRippleDecoration : public IHyprWindowDecoration {
       public:
-        explicit CRippleDecoration(PHLWINDOW w) : IHyprWindowDecoration(w) {}
+        explicit CRippleDecoration(PHLWINDOW w) : IHyprWindowDecoration(w), m_owner(w) {}
 
         SDecorationPositioningInfo getPositioningInfo() override {
             return {.policy = DECORATION_POSITION_ABSOLUTE};
@@ -410,10 +406,11 @@ namespace {
             return std::string(PLUGIN_NAME);
         }
 
-        void draw(Render::CRenderContext& ctx, PHLMONITOR mon, float const& a, const Render::SWindowRenderPresentation&) override {
+        void draw(HLC_DECO_DRAW_PARAMS(ctx, mon, a)) override {
+            HLC_CTX_BIND(ctx);
             if (!g_state || g_state->ripples.empty() || !mon || ctx.m_renderingSnapshot)
                 return;
-            const auto w = owningWindow();
+            const auto w = m_owner.lock();
             if (!w)
                 return;
             const CBox monBox{mon->m_position.x, mon->m_position.y, mon->m_size.x, mon->m_size.y};
@@ -428,10 +425,13 @@ namespace {
             if (drew)
                 g_state->nFrames++;
         }
+
+      private:
+        PHLWINDOWREF m_owner; // the base keeps its own private on 0.56
     };
 
     bool hasRippleDecoration(const PHLWINDOW& w) {
-        for (const auto& d : w->presentation().decorations())
+        for (const auto& d : hlc::decorations(w))
             if (dynamic_cast<CRippleDecoration*>(d.get()))
                 return true;
         return false;
@@ -439,7 +439,7 @@ namespace {
 
     void decorate(const PHLWINDOW& w) {
         if (w && !hasRippleDecoration(w))
-            HyprlandAPI::addWindowDecoration(PHANDLE, w, makeShared<CRippleDecoration>(w));
+            hlc::addDecoration<CRippleDecoration>(PHANDLE, w);
     }
 
     // Drawn by its window's decoration rather than in the global pass.
@@ -447,13 +447,13 @@ namespace {
         if (r.above)
             return false;
         const auto w = r.anchor.lock();
-        return w && w->mapped() && hasRippleDecoration(w);
+        return w && hlc::mapped(w) && hasRippleDecoration(w);
     }
 
     // Window ripples go in right after windows (under bars and launchers);
     // ripples on a bar / launcher go in at the last moment, above layers.
     // Ripples anchored to a window are drawn by that window's decoration.
-    void onRenderStage(const Event::SRenderStageEvent& ev) {
+    void onRenderStage(const hlc::RenderStageEvent& ev) {
         const auto stage = ev.stage;
         if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty())
             return;
@@ -491,7 +491,7 @@ namespace {
     PHLWINDOW windowAtPoint(const Vector2D& p) {
         const auto w = Desktop::viewState()->hitTest().windowAt(
             p, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-        return w && w->mapped() && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
+        return w && hlc::mapped(w) && !w->isHidden() && liveBox(w).containsPoint(p) ? w : nullptr;
     }
 
     // A bar, launcher or other top/overlay layer surface under the point.
@@ -510,7 +510,7 @@ namespace {
             return found;
         for (int layer = 3; layer >= 2; --layer) { // overlay, then top
             found = nullptr;
-            if (hit.layerSurfaceAt(p, &mon->m_layerSurfaceLayers[layer], &local, &found) && found && found->mapped())
+            if (hit.layerSurfaceAt(p, &mon->m_layerSurfaceLayers[layer], &local, &found) && found && hlc::mapped(found))
                 return found;
         }
         return nullptr;
@@ -523,7 +523,7 @@ namespace {
             return;
         r.clip         = true;
         r.clipBox      = liveBox(w);
-        r.clipRounding = w->presentation().rounding();
+        r.clipRounding = hlc::rounding(w);
     }
 
     // Press-style triggers (mouse, touch, pen) share this: held ink that
@@ -598,7 +598,7 @@ namespace {
 
     void onWindowActive(PHLWINDOW window, Desktop::eFocusReason reason) {
         const auto& s = g_state->settings;
-        if (!window || !window->mapped() || window->isHidden())
+        if (!window || !hlc::mapped(window) || window->isHidden())
             return;
 
         // Click-to-focus: the click ripple spawned a moment ago (before focus
@@ -653,7 +653,7 @@ namespace {
         }
 
         if (s.bounded)
-            spawn({.center = origin, .radius = (float)Logic::coverRadius(vec(origin), rect(box)), .clip = box, .clipRounding = window->presentation().rounding(), .anchor = window});
+            spawn({.center = origin, .radius = (float)Logic::coverRadius(vec(origin), rect(box)), .clip = box, .clipRounding = hlc::rounding(window), .anchor = window});
         else
             spawn({.center = origin, .radius = std::max<float>(s.radius, std::min(box.w, box.h) * 0.5f), .anchor = window});
     }
@@ -705,8 +705,8 @@ namespace {
     std::string setFromCaller(const std::string& key, const std::string& value) {
         const std::string before = g_state->settings.style;
         auto              err    = Logic::applySetting(g_state->settings, key, value);
-        if (err.empty() && key == "style" && g_state->settings.style != before && IPC::Socket2::sock())
-            IPC::Socket2::sock()->postEvent(IPC::Socket2::SEvent{"hyprripplestyle", before + "," + g_state->settings.style});
+        if (err.empty() && key == "style" && g_state->settings.style != before)
+            hlc::postEvent("hyprripplestyle", before + "," + g_state->settings.style);
         return err;
     }
 
@@ -904,7 +904,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprripple", "trigger", luaTrigger);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprripple", "set", luaSet);
 
-    g_state->ctl = HyprlandAPI::registerHyprCtlCommand(PHANDLE, IPC::Socket1::SCommand{.name = "hyprripple", .match = IPC::Socket1::COMMAND_MATCH_PREFIX, .handler = [](const IPC::Socket1::SRequest& r) { return IPC::Socket1::SResponse(onHyprctl(r.command)); }});
+    g_state->ctl = hlc::registerCtl(PHANDLE, "hyprripple", onHyprctl);
 
     auto& ev = Event::bus()->m_events;
     g_state->listeners.push_back(ev.input.mouse.button.listen([](const IPointer::SButtonEvent& e, Event::SCallbackInfo&) {
@@ -954,7 +954,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     for (const auto& w : Desktop::viewState()->windows())
         decorate(w);
     g_state->listeners.push_back(ev.render.pre.listen([](PHLMONITOR mon) { onPreRender(mon); }));
-    g_state->listeners.push_back(ev.render.stage.listen([](const Event::SRenderStageEvent& e) { onRenderStage(e); }));
+    g_state->listeners.push_back(hlc::listenRenderStage([](const hlc::RenderStageEvent& e) { onRenderStage(e); }));
     g_state->listeners.push_back(ev.config.reloaded.listen([]() {
         if (g_state)
             loadFromConfig();
@@ -991,12 +991,13 @@ APICALL EXPORT void PLUGIN_EXIT() {
     std::vector<IHyprWindowDecoration*> decos;
     for (const auto& w : Desktop::viewState()->windows())
         if (w)
-            for (const auto& d : w->presentation().decorations())
+            for (const auto& d : hlc::decorations(w))
                 if (dynamic_cast<CRippleDecoration*>(d.get()))
                     decos.push_back(d.get());
     for (auto* d : decos)
         HyprlandAPI::removeWindowDecoration(PHANDLE, d);
 
+    hlc::removePassElements("CRipplePassElement");
     RippleShader::destroy();
     g_state.reset();
 }
