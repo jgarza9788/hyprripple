@@ -31,6 +31,8 @@
 #include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/desktop/state/ViewHitTester.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
+#include <hyprland/src/render/WindowRenderPresentation.hpp>
 #include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprutils/signal/Listener.hpp>
 
@@ -367,8 +369,90 @@ namespace {
             self->updateTimeout(SWEEP);
     }
 
+    // Queue one ripple into a render pass at this frame's size / alpha.
+    void addRipple(Render::CRenderContext& ctx, const SRipple& r, steady_clock::time_point now, float alphaMul = 1.f) {
+        const auto life = r.life(now);
+        ctx.m_pass.add(makeUnique<CRipplePassElement>(CRipplePassElement::SData{
+            .ripple = r,
+            .radius = r.maxRadius * Logic::spreadFraction(life),
+            .alpha  = Logic::alpha(life, r.opacity) * alphaMul,
+            .fade   = Logic::fade(life),
+            .time   = life.elapsed,
+            .decay  = Logic::waveDecay(life),
+        }));
+    }
+
+    // ── per-window drawing ───────────────────────────────────────────────────
+    // A ripple that rides on a window is drawn as one of that window's
+    // decorations (above its content, below its popups). It then lands in the
+    // render pass in window order, so any window stacked in front covers it -
+    // instead of every ripple being painted over all windows at the end.
+    class CRippleDecoration : public IHyprWindowDecoration {
+      public:
+        explicit CRippleDecoration(PHLWINDOW w) : IHyprWindowDecoration(w) {}
+
+        SDecorationPositioningInfo getPositioningInfo() override {
+            return {.policy = DECORATION_POSITION_ABSOLUTE};
+        }
+        void            onPositioningReply(const SDecorationPositioningReply&) override {}
+        eDecorationType getDecorationType() override {
+            return DECORATION_CUSTOM;
+        }
+        void             updateWindow(PHLWINDOW) override {}
+        void             damageEntire() override {} // ripples damage themselves
+        eDecorationLayer getDecorationLayer() override {
+            return DECORATION_LAYER_OVER;
+        }
+        uint64_t getDecorationFlags() override {
+            return DECORATION_NON_SOLID;
+        }
+        std::string getDisplayName() override {
+            return std::string(PLUGIN_NAME);
+        }
+
+        void draw(Render::CRenderContext& ctx, PHLMONITOR mon, float const& a, const Render::SWindowRenderPresentation&) override {
+            if (!g_state || g_state->ripples.empty() || !mon || ctx.m_renderingSnapshot)
+                return;
+            const auto w = owningWindow();
+            if (!w)
+                return;
+            const CBox monBox{mon->m_position.x, mon->m_position.y, mon->m_size.x, mon->m_size.y};
+            const auto now  = steady_clock::now();
+            bool       drew = false;
+            for (const auto& r : g_state->ripples) {
+                if (r.above || r.anchor.lock() != w || !r.bounds().overlaps(monBox))
+                    continue;
+                addRipple(ctx, r, now, a);
+                drew = true;
+            }
+            if (drew)
+                g_state->nFrames++;
+        }
+    };
+
+    bool hasRippleDecoration(const PHLWINDOW& w) {
+        for (const auto& d : w->presentation().decorations())
+            if (dynamic_cast<CRippleDecoration*>(d.get()))
+                return true;
+        return false;
+    }
+
+    void decorate(const PHLWINDOW& w) {
+        if (w && !hasRippleDecoration(w))
+            HyprlandAPI::addWindowDecoration(PHANDLE, w, makeShared<CRippleDecoration>(w));
+    }
+
+    // Drawn by its window's decoration rather than in the global pass.
+    bool drawnByWindow(const SRipple& r) {
+        if (r.above)
+            return false;
+        const auto w = r.anchor.lock();
+        return w && w->mapped() && hasRippleDecoration(w);
+    }
+
     // Window ripples go in right after windows (under bars and launchers);
     // ripples on a bar / launcher go in at the last moment, above layers.
+    // Ripples anchored to a window are drawn by that window's decoration.
     void onRenderStage(const Event::SRenderStageEvent& ev) {
         const auto stage = ev.stage;
         if ((stage != RENDER_POST_WINDOWS && stage != RENDER_LAST_MOMENT && stage != RENDER_POST) || !g_state || g_state->ripples.empty())
@@ -391,18 +475,10 @@ namespace {
         const auto now = steady_clock::now();
         bool       drew = false;
         for (auto& r : g_state->ripples) {
-            if (r.above != above || !r.bounds().overlaps(monBox))
+            if (r.above != above || !r.bounds().overlaps(monBox) || drawnByWindow(r))
                 continue;
-            drew            = true;
-            const auto life = r.life(now);
-            ctx.m_pass.add(makeUnique<CRipplePassElement>(CRipplePassElement::SData{
-                .ripple = r,
-                .radius = r.maxRadius * Logic::spreadFraction(life),
-                .alpha  = Logic::alpha(life, r.opacity),
-                .fade   = Logic::fade(life),
-                .time   = life.elapsed,
-                .decay  = Logic::waveDecay(life),
-            }));
+            drew = true;
+            addRipple(ctx, r, now);
         }
         if (drew)
             g_state->nFrames++;
@@ -871,6 +947,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             if (n <= 0)
                 g_state->shares.erase(name);
     }));
+    g_state->listeners.push_back(ev.window.open.listen([](PHLWINDOW w) {
+        if (g_state)
+            decorate(w);
+    }));
+    for (const auto& w : Desktop::viewState()->windows())
+        decorate(w);
     g_state->listeners.push_back(ev.render.pre.listen([](PHLMONITOR mon) { onPreRender(mon); }));
     g_state->listeners.push_back(ev.render.stage.listen([](const Event::SRenderStageEvent& e) { onRenderStage(e); }));
     g_state->listeners.push_back(ev.config.reloaded.listen([]() {
@@ -904,6 +986,16 @@ APICALL EXPORT void PLUGIN_EXIT() {
 
     for (const auto& r : g_state->ripples)
         g_pHyprRenderer->damageBox(r.lastBounds.value_or(r.bounds()));
+
+    // Collect first: removing edits the window's decoration list.
+    std::vector<IHyprWindowDecoration*> decos;
+    for (const auto& w : Desktop::viewState()->windows())
+        if (w)
+            for (const auto& d : w->presentation().decorations())
+                if (dynamic_cast<CRippleDecoration*>(d.get()))
+                    decos.push_back(d.get());
+    for (auto* d : decos)
+        HyprlandAPI::removeWindowDecoration(PHANDLE, d);
 
     RippleShader::destroy();
     g_state.reset();
