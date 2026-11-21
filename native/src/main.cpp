@@ -423,12 +423,20 @@ namespace {
         const auto mon = monitorAt(p);
         if (!mon)
             return nullptr;
-        for (int layer = 3; layer >= 2; --layer) // overlay, then top
-            for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
-                const auto ls = ref.lock();
-                if (ls && ls->mapped() && ls->m_geometry.containsPoint(p))
-                    return ls;
-            }
+        // Hit-test the way Hyprland routes input: a layer only counts where its
+        // input region accepts the pointer. Shells like Omarchy map full-screen
+        // or tall transparent layers (bar, notifications) that take no input
+        // over most of their box; a geometry check would clip every click to them.
+        const auto& hit = Desktop::viewState()->hitTest();
+        Vector2D    local;
+        PHLLS       found;
+        if (hit.layerPopupSurfaceAt(p, mon, &local, &found) && found)
+            return found;
+        for (int layer = 3; layer >= 2; --layer) { // overlay, then top
+            found = nullptr;
+            if (hit.layerSurfaceAt(p, &mon->m_layerSurfaceLayers[layer], &local, &found) && found && found->mapped())
+                return found;
+        }
         return nullptr;
     }
 
